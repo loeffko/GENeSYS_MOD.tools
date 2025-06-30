@@ -201,19 +201,22 @@ def generate_final_energy_values(data_wrapper: dw.DataWrapper):
 def _extract_final_energy_heat(data_wrapper):
     raw = data_wrapper.usage_values.copy()
 
-    hlr = raw[raw['fuel'] == 'Heat_Low_Residential'].copy()
-    hlr = hlr[hlr['technology'] == 'Demand']
+    hlb = raw[raw['fuel'] == 'Heat_Buildings'].copy()
+    hlb = hlb[hlb['technology'] == 'Demand']
 
     hli = raw[raw['fuel'] == 'Heat_Low_Industrial'].copy()
     hli = hli[hli['technology'] == 'Demand']
 
-    hmi = raw[raw['fuel'] == 'Heat_Medium_Industrial'].copy()
-    hmi = hmi[hmi['technology'] == 'Demand']
+    hmli = raw[raw['fuel'] == 'Heat_MediumLow_Industrial'].copy()
+    hmli = hmli[hmli['technology'] == 'Demand']
+
+    hmhi = raw[raw['fuel'] == 'Heat_MediumHigh_Industrial'].copy()
+    hmhi = hmhi[hmhi['technology'] == 'Demand']
 
     hhi = raw[raw['fuel'] == 'Heat_High_Industrial'].copy()
     hhi = hhi[hhi['technology'] == 'Demand']
 
-    heat = pd.concat([hlr, hli, hmi, hhi])
+    heat = pd.concat([hlb, hli, hmli, hmhi, hhi])
 
     heat['fuel'] = 'Final Energy|Heat'
 
