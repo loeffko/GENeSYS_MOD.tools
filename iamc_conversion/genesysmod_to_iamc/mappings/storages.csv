@@ -1,4 +1,5 @@
-D_Battery_Li-Ion,Battery|Lithium-Ion
-D_Battery_Redox,Battery|Redox Flow
-D_CAES,Compressed Air
-D_PHS,Hydro|Pumped Storage
+D_Battery_Li-Ion,Electricity Storage|Lithium-Ion
+D_Battery_Redox,Electricity Storage|Redox Flow
+D_CAES,Electricity Storage|Compressed Air
+D_PHS,Electricity Storage|Pumped Storage
+D_PHS_Residual,Electricity Storage|Pumped Storage

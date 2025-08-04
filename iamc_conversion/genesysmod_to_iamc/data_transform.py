@@ -201,19 +201,22 @@ def generate_final_energy_values(data_wrapper: dw.DataWrapper):
 def _extract_final_energy_heat(data_wrapper):
     raw = data_wrapper.usage_values.copy()
 
-    hlr = raw[raw['fuel'] == 'Heat_Low_Residential'].copy()
-    hlr = hlr[hlr['technology'] == 'Demand']
+    hb = raw[raw['fuel'] == 'Heat_Buildings'].copy()
+    hb = hb[hb['technology'] == 'Demand']
 
     hli = raw[raw['fuel'] == 'Heat_Low_Industrial'].copy()
     hli = hli[hli['technology'] == 'Demand']
 
-    hmi = raw[raw['fuel'] == 'Heat_Medium_Industrial'].copy()
-    hmi = hmi[hmi['technology'] == 'Demand']
+    hmli = raw[raw['fuel'] == 'Heat_MediumLow_Industrial'].copy()
+    hmli = hmli[hmli['technology'] == 'Demand']
+
+    hmhi = raw[raw['fuel'] == 'Heat_MediumHigh_Industrial'].copy()
+    hmhi = hmhi[hmhi['technology'] == 'Demand']
 
     hhi = raw[raw['fuel'] == 'Heat_High_Industrial'].copy()
     hhi = hhi[hhi['technology'] == 'Demand']
 
-    heat = pd.concat([hlr, hli, hmi, hhi])
+    heat = pd.concat([hb, hli, hmli, hmhi, hhi])
 
     heat['fuel'] = 'Final Energy|Heat'
 
@@ -258,27 +261,41 @@ def generate_transmission_capacity_values(data_wrapper: dw.DataWrapper):
     logging.info('Executing: generate_transmission_capacity_values')
 
     trade_values = data_wrapper.trade_capacity_values.copy()
-    trade_values = trade_values[trade_values['type'] == 'Power Transmissions Capacity']
+    trade_values = trade_values[(trade_values['type'] == 'Transmissions Capacity') & trade_values['fuel'].isin(['Power', 'Gas_Natural', 'H2'])]
     trade_values['model'] = DEF_MODEL_AND_VERSION
-    trade_values['unit'] = 'MW'
     trade_values['value'] = abs(trade_values['value'])*1000
     trade_values['subannual'] = 'Year'
-    trade_values['variable'] = 'Network|Electricity|Maximum Flow'
+
+    fuel_to_carrier = {
+        'Power': 'Electricity',
+        'Gas_Natural': 'Natural Gas',
+        'H2': 'Hydrogen'
+    }
+
+    trade_values['variable'] = 'Network|' + trade_values['fuel'].map(fuel_to_carrier) + '|Capacity'
+
+    fuel_to_unit = {
+        'Power': 'MW',
+        'Gas_Natural': 'GW',
+        'H2': 'GW'
+    }
+
+    trade_values['unit'] = trade_values['fuel'].map(fuel_to_unit)
 
     trade_values['scenario'] = data_wrapper.capacity_values['scenario'][0]
     trade_values = _set_scenarios(trade_values)
 
-    trade_values = trade_values.replace({'region_to': 'UK'}, 'GB')
-    trade_values = trade_values.replace({'region_from': 'UK'}, 'GB')
+    # trade_values = trade_values.replace({'region_to': 'UK'}, 'GB')
+    # trade_values = trade_values.replace({'region_from': 'UK'}, 'GB')
 
     iso2_mapping = dr.loadmap_iso2_countries()
 
     for r in iso2_mapping:
         trade_values = trade_values.replace({'region_from': r}, iso2_mapping[r])
         trade_values = trade_values.replace({'region_to': r}, iso2_mapping[r])
-
-    trade_values = trade_values.replace({'region_to': 'NONEU_Balkan'}, 'Non-EU-Balkans')
-    trade_values = trade_values.replace({'region_from': 'NONEU_Balkan'}, 'Non-EU-Balkans')
+    #
+    # trade_values = trade_values.replace({'region_to': 'NONEU_Balkan'}, 'Non-EU-Balkans')
+    # trade_values = trade_values.replace({'region_from': 'NONEU_Balkan'}, 'Non-EU-Balkans')
 
     trade_values['region'] = trade_values['region_from'] + ">" + trade_values['region_to']
 
@@ -288,7 +305,7 @@ def generate_transmission_capacity_values(data_wrapper: dw.DataWrapper):
 
 
     data_wrapper.transformed_data['transmission'] = trade_values
-
+    trade_values.to_csv("trade_values.csv", index=False)
     return trade_values
 
 
@@ -305,15 +322,16 @@ def generate_storage_capacity_values(data_wrapper: dw.DataWrapper):
     for entry in map_capacity_storage:
 
         capacity_value = capacity_values[capacity_values['technology'] == entry].copy()
-        capacity_value = capacity_value.replace({'technology': entry}, 'Maximum Storage|Electricity|' + map_capacity_storage[entry])
+        capacity_value = capacity_value.replace({'technology': entry}, 'Capacity|Electricity|' + map_capacity_storage[entry])
 
-        if map_capacity_storage[entry] == 'Maximum Storage|Electricity|Hydro|Pumped Storage':
-            capacity_value['unit'] = 'GWh'
-            capacity_value['value'] = abs(capacity_value['value']) * map_e2p_ratios[map_capacity_storage[entry]]
-        else:
-            capacity_value['unit'] = 'GWh'
-            capacity_value['value'] = abs(capacity_value['value']) * map_e2p_ratios[map_capacity_storage[entry]]
+        # if map_capacity_storage[entry] == 'Capacity|Electricity|Pumped Storage':
+        #     capacity_value['unit'] = 'GWh'
+        #     capacity_value['value'] = abs(capacity_value['value']) * map_e2p_ratios[map_capacity_storage[entry]]
+        # else:
+        #     capacity_value['unit'] = 'GWh'
+        #     capacity_value['value'] = abs(capacity_value['value']) * map_e2p_ratios[map_capacity_storage[entry]]
 
+        capacity_value['unit'] = 'GW'
         capacity_value['model'] = DEF_MODEL_AND_VERSION
         capacity_value['subannual'] = 'Year'
 
@@ -350,11 +368,11 @@ def generate_transport_capacity_values(data_wrapper: dw.DataWrapper):
 
     capacity_values['unit'] = 'Gvkm'
     for entry in map_capacity_technology:
-        capacity_values = capacity_values.replace({'technology': entry}, 'Energy Service|' + map_capacity_technology[entry])
+        capacity_values = capacity_values.replace({'technology': entry}, 'Capacity|' + map_capacity_technology[entry])
 
     capacity_values['model'] = DEF_MODEL_AND_VERSION
-    for entry in map_units_technology:
-        capacity_values.loc[(capacity_values['technology'] == 'Energy Service|' + entry), 'unit'] = map_units_technology[entry]
+    # for entry in map_units_technology:
+    #     capacity_values.loc[(capacity_values['technology'] == 'Capacity|' + entry), 'unit'] = map_units_technology[entry]
 
     capacity_values['value'] = abs(capacity_values['value'])
     capacity_values['subannual'] = 'Year'
@@ -455,13 +473,14 @@ def generate_secondary_energy(data_wrapper: dw.DataWrapper):
 
     map_secondary_energy_heat = dr.loadmap_from_csv('secondary_energy_heat')
     heat_values = prod_values[prod_values['technology'].isin(map_secondary_energy_heat.keys())].copy()
-    heat_values = heat_values[(heat_values['fuel'] == 'Heat_Low_Residential') |
+    heat_values = heat_values[(heat_values['fuel'] == 'Heat_Buildings') |
                               (heat_values['fuel'] == 'Heat_Low_Industrial') |
-                              (heat_values['fuel'] == 'Heat_Medium_Industrial') |
+                              (heat_values['fuel'] == 'Heat_MediumLow_Industrial') |
+                              (heat_values['fuel'] == 'Heat_MediumHigh_Industrial') |
                               (heat_values['fuel'] == 'Heat_High_Industrial')]
     for entry in map_secondary_energy_heat:
         heat_values = heat_values.replace({'technology': entry},
-                                          'Secondary Energy|' + map_secondary_energy_heat[entry])
+                                          'Secondary Energy|Heat|' + map_secondary_energy_heat[entry])
     heat_values['unit'] = 'EJ/yr'
 
     # map_secondary_energy_transport = dr.loadmap_from_csv('secondary_energy_transport')
@@ -787,13 +806,13 @@ def _generate_load_factors(data_wrapper: dw.DataWrapper, excel_file: str, sheet_
         ['model', 'scenario', 'region', 'technology', 'unit', 'subannual', 'year'])['value'].mean().reset_index()
     dataframe.columns = ['Model', 'Scenario', 'Region', 'Variable', 'Unit', 'Subannual', 'Year', 'Value']
 
-    dataframe = dataframe.replace({'Region': 'UK'}, 'GB')
-    dataframe = dataframe.replace({'Region': 'NONEU_Balkan'}, 'Non-EU-Balkans')
-
-    iso2_mapping = dr.loadmap_iso2_countries()
-
-    for r in iso2_mapping:
-        dataframe = dataframe.replace({'Region': r}, iso2_mapping[r])
+    # dataframe = dataframe.replace({'Region': 'UK'}, 'GB')
+    # dataframe = dataframe.replace({'Region': 'NONEU_Balkan'}, 'Non-EU-Balkans')
+    #
+    # iso2_mapping = dr.loadmap_iso2_countries()
+    #
+    # for r in iso2_mapping:
+    #     dataframe = dataframe.replace({'Region': r}, iso2_mapping[r])
 
     data_wrapper.transformed_data['loadFactor ' + excel_file] = dataframe
 

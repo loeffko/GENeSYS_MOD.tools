@@ -1,0 +1,166 @@
+# this mapping file is intended for models that have a country-resolution of Europe
+# and use ISO3 codes for country names
+model:
+ - GENeSYS-MOD 4.0
+native_regions:
+ - AL: Albania
+ - AT: Austria
+ - BA: Bosnia and Herzegovina
+ - BE: Belgium
+ - BG: Bulgaria
+ - CH: Switzerland
+ - CY: Cyprus
+ - CZ: Czech Republic
+ - DE: Germany
+ - DK: Denmark
+ - ES: Spain
+ - EE: Estonia
+ - FI: Finland
+ - FR: France
+ - GR: Greece
+ - HR: Croatia
+ - HU: Hungary
+ - IE: Ireland
+ - IT: Italy
+ - LT: Lithuania
+ - LU: Luxembourg
+ - LV: Latvia
+ - ME: Montenegro
+ - MK: North Macedonia
+ - MT: Malta
+ - NL: The Netherlands
+ - "NO": Norway
+ - NONEU_Balkan: Non-EU-Balkans
+ - PL: Poland
+ - PT: Portugal
+ - RO: Romania
+ - RS: Serbia
+ - RU: Russia
+ - SK: Slovakia
+ - SI: Slovenia
+ - SE: Sweden
+ - TR: Turkey
+ - UA: Ukraine
+ - UK: United Kingdom
+ - XK: Kosovo
+ - EU27 (excl. Malta & Cyprus): EU27 (excl. Malta & Cyprus)
+ - Europe (incl. Turkey): Europe (incl. Turkey)
+# common_regions:
+#  - EU27:
+#    - AT
+#    - BE
+#    - BG
+#    - CY
+#    - CZ
+#    - DE
+#    - DK
+#    - ES
+#    - EE
+#    - FI
+#    - FR
+#    - GR
+#    - HR
+#    - HU
+#    - IE
+#    - IT
+#    - LT
+#    - LU
+#    - LV
+#    - MT
+#    - NL
+#    - PL
+#    - PT
+#    - RO
+#    - SK
+#    - SI
+#    - SE
+#  - "EU27 (excl. Malta & Cyprus)":
+#    - AT
+#    - BE
+#    - BG
+#    - CZ
+#    - DE
+#    - DK
+#    - ES
+#    - EE
+#    - FI
+#    - FR
+#    - GR
+#    - HR
+#    - HU
+#    - IE
+#    - IT
+#    - LT
+#    - LU
+#    - LV
+#    - NL
+#    - PL
+#    - PT
+#    - RO
+#    - SK
+#    - SI
+#    - SE
+#  - "EU27 & UK":
+#    - AT
+#    - BE
+#    - BG
+#    - CY
+#    - CZ
+#    - DE
+#    - DK
+#    - ES
+#    - EE
+#    - FI
+#    - FR
+#    - GR
+#    - HR
+#    - HU
+#    - IE
+#    - IT
+#    - LT
+#    - LU
+#    - LV
+#    - MT
+#    - NL
+#    - PL
+#    - PT
+#    - RO
+#    - SK
+#    - SI
+#    - SE
+#    - UK
+#  - "Europe (incl. Turkey)":
+#    - AT
+#    - BE
+#    - BG
+#    - CH
+#    - CY
+#    - CZ
+#    - DE
+#    - DK
+#    - ES
+#    - EE
+#    - FI
+#    - FR
+#    - GR
+#    - HR
+#    - HU
+#    - IE
+#    - IT
+#    - LT
+#    - LU
+#    - LV
+#    - MT
+#    - NL
+#    - "NO"
+#    - NONEU_Balkan
+#    - PL
+#    - PT
+#    - RO
+#    - SK
+#    - SI
+#    - SE
+#    - UK
+#    - TR
+  
+

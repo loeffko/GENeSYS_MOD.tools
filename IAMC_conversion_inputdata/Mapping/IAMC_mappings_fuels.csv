@@ -12,10 +12,11 @@ Mobility_Passenger,Transportation|Passenger
 Lignite,Coal|Lignite
 Gas_Bio,Gas|Biomethane
 Gas_Synth,Gas|Synthetic Methane
-Heat_Buildings,Heat|Commercial and Residential
-Heat_Low_Industrial,Heat|Industrial
-Heat_Medium_Industrial,Heat|Industrial
-Heat_High_Industrial,Heat|Industrial
+Heat_Buildings,Heat|Buildings
+Heat_Low_Industrial,Heat|Industrial|Low Temperature
+Heat_MediumLow_Industrial,Heat|Industrial|Medium Low Temperature
+Heat_MediumHigh_Industrial,Heat|Industrial|Medium High Temperature
+Heat_High_Industrial,Heat|Industrial|High Temperature
 Biofuel,Biofuel
 Powerfuel,E-Fuel
 LNG,LNG

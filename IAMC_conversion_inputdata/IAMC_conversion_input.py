@@ -42,12 +42,12 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 continue
 
 
-            full_report = ["Par_AnnualEmissionLimit","Par_AnnualExogenousEmission","Par_AvailabilityFactor","Par_CapitalCost","Par_CapitalCostStorage","Par_CommissionedTradeCapacity","Par_EmissionActivityRatio","Par_EmissionContentPerFuel","Par_FixedCost",
-                        "Par_InputActivityRatio","Par_ModelPeriodActivityMaxLimit","Par_ModelPeriodEmissionLimit","Par_OperationalLife","Par_OperationalLifeStorage","Par_OutputActivityRatio","Par_RegionalCCSLimit",
-                        "Par_ResidualCapacity","Par_ResidualStorageCapacity","Par_StorageE2PRatio","Par_SpecifiedAnnualDemand","Par_TechnologyDiscountRate","Par_TechnologyFromStorage","Par_TechnologyToStorage","Par_TotalAnnualMaxActivity",
+            full_report = ["Par_AnnualEmissionLimit","Par_AnnualExogenousEmission","Par_AnnualMinNewCapacity","Par_AvailabilityFactor","Par_CapitalCost","Par_CapitalCostStorage","Par_CommissionedTradeCapacity","Par_EmissionActivityRatio","Par_EmissionContentPerFuel","Par_FixedCost",
+                        "Par_REMinProductionTarget","Par_InputActivityRatio","Par_ModelPeriodActivityMaxLimit","Par_ModelPeriodEmissionLimit","Par_NewCapacityExpansionStop","Par_OperationalLife","Par_OperationalLifeStorage","Par_OutputActivityRatio","Par_RegionalCCSLimit",
+                        "Par_ResidualCapacity","Par_ResidualStorageCapacity","Par_StorageE2PRatio","Par_SpecifiedAnnualDemand","Par_SpecifiedDemandDevelopment","Par_TechnologyDiscountRate","Par_TechnologyFromStorage","Par_TechnologyToStorage","Par_TotalAnnualMaxActivity",
                         "Par_TotalAnnualMaxCapacity","Par_TradeCapacity","Par_TradeCapacityGrowthCosts","Par_VariableCost"]
 
-            specific_reporting = ["Par_ResidualCapacity", "Par_SpecifiedAnnualDemand"]
+            #specific_reporting = ["Par_SpecifiedAnnualDemand", "Par_SpecifiedDemandDevelopment"]
 
             if item not in full_report:
                 continue
@@ -117,7 +117,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
                 print(f'Successfully converted {item}')
 
-            if item in ["Par_AvailabilityFactor", "Par_CapitalCost", "Par_CapitalCostStorage", "Par_FixedCost", "Par_ModelPeriodActivityMaxLimit", "Par_ResidualCapacity", "Par_ResidualStorageCapacity",
+            if item in ["Par_AnnualMinNewCapacity","Par_AvailabilityFactor", "Par_CapitalCost", "Par_CapitalCostStorage", "Par_FixedCost", "Par_ModelPeriodActivityMaxLimit", "Par_ResidualCapacity", "Par_ResidualStorageCapacity",
                         "Par_StorageE2PRatio"]:
 
                 if "Technology" in df.columns:
@@ -136,24 +136,15 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                     df["Variable"] = "Maximum Utilization|" + df["Technology"]
 
                 elif item in ["Par_CapitalCost","Par_FixedCost"]:
-                    df_list = []
 
-                    for region in regions:
-                        region_df = df.copy()
+                    df["Unit"] = "EUR_2020/kW"
 
-                        region_df["Unit"] = "EUR_2020/kW"
-                        region_df = region_df[region_df["Year"] != 2021]
+                    df = df[df["Year"] != 2021]
 
-                        region_df['Region'] = region
-
-                        if item == "Par_FixedCost":
-                            region_df["Variable"] = "Fixed Cost|" + region_df["Technology"]
-                        elif item == "Par_CapitalCost":
-                            region_df["Variable"] = "Capital Cost|" + region_df["Technology"]
-
-                        df_list.append(region_df)
-
-                    df = pd.concat(df_list)
+                    if item == "Par_FixedCost":
+                        df["Variable"] = "Fixed Cost|" + df["Technology"]
+                    elif item == "Par_CapitalCost":
+                        df["Variable"] = "Capital Cost|" + df["Technology"]
 
                 elif item == "Par_CapitalCostStorage":
                     df["Unit"] = "EUR_2020/GJ"
@@ -167,6 +158,10 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 elif item == "Par_ResidualCapacity":
                     df["Unit"] = "GW"
                     df["Variable"] = "Residual Capacity|" + df["Technology"]
+
+                elif item == "Par_AnnualMinNewCapacity":
+                    df["Unit"] = "GW"
+                    df["Variable"] = "New Capacity Lower Limit|" + df["Technology"]
 
                 elif item == "Par_ResidualStorageCapacity":
                     df["Unit"] = "PJ"
@@ -303,6 +298,23 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
                 df_final = pd.concat([df_final,df_temp])
 
+            if item == "Par_NewCapacityExpansionStop":
+
+                df = df[df["Technology"].isin(rename_mapping_technologies.keys())]
+                df["Technology"] = df["Technology"].replace(rename_mapping_technologies)
+
+                df["Unit"] = "Year"
+                df["Variable"] = "Capacity Expansion Stop|" + df["Technology"]
+                df["Year"] = 2018
+
+                df_temp = df.pivot(index=['Region', 'Variable', 'Unit'], columns='Year', values='Value')
+
+                df_temp = df_temp.reset_index()
+
+                df_final = pd.concat([df_final, df_temp])
+
+                print(f'Successfully converted {item}')
+
             if item == "Par_OperationalLife":
 
                 df = df[df["Technology"].isin(rename_mapping_technologies.keys())]
@@ -345,6 +357,24 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
                 print(f'Successfully converted {item}')
 
+            if item == "Par_REMinProductionTarget":
+
+                df = df[df["Fuel"].isin(rename_mapping_fuels.keys())]
+                df["Fuel"] = df["Fuel"].replace(rename_mapping_fuels)
+                df = df[(df["Year"] != 2019) & (df["Year"] != 2021)]
+
+                df["Unit"] = "Percentage"
+
+                df["Variable"] = "Renewable Share Target|" + df["Fuel"]
+
+                df_temp = df.pivot_table(index=['Region', 'Variable', 'Unit'], columns='Year', values='Value')
+
+                df_temp = df_temp.reset_index()
+
+                df_final = pd.concat([df_final, df_temp])
+
+                print(f'Successfully converted {item}')
+
             if item == "Par_SpecifiedAnnualDemand":
 
                 df = df[df["Fuel"].isin(rename_mapping_fuels.keys())]
@@ -357,6 +387,33 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
                 df["Variable"] = "Demand|" + df["Fuel"]
 
+                # Split into H2 and non-H2
+                df_h2 = df[df["Fuel"] == "Hydrogen"]
+                df_non_h2 = df[df["Fuel"] != "H2"]
+                df_non_h2 = df_non_h2[df_non_h2["Year"] == 2018]
+
+                # Combine again
+                df = pd.concat([df_h2, df_non_h2])
+
+                df_temp = df.pivot_table(index=['Region', 'Variable', 'Unit'], columns='Year', values='Value',
+                                         aggfunc='sum')
+
+                df_temp = df_temp.reset_index()
+
+                df_final = pd.concat([df_final, df_temp])
+
+                print(f'Successfully converted {item}')
+
+            if item == "Par_SpecifiedDemandDevelopment":
+
+                df = df[df["Fuel"].isin(rename_mapping_fuels.keys())]
+                df["Fuel"] = df["Fuel"].replace(rename_mapping_fuels)
+                df = df[(df["Year"] != 2019) & (df["Year"] != 2021)]
+
+                df["Unit"] = "Factor"
+
+                df["Variable"] = "Demand Development Factor|" + df["Fuel"]
+
                 df_temp = df.pivot_table(index=['Region', 'Variable', 'Unit'], columns='Year', values='Value', aggfunc='sum')
 
                 df_temp = df_temp.reset_index()
@@ -364,6 +421,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 df_final = pd.concat([df_final, df_temp])
 
                 print(f'Successfully converted {item}')
+
 
             if item == "Par_TechnologyDiscountRate":
 
@@ -536,7 +594,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
             scenario = file.partition(".")[0]
             df_final["Model"] = "GENeSYS-MOD 4.0"
-            df_final["Scenario"] = scenario + " v0"
+            df_final["Scenario"] = scenario + " v1.1.0"
             second = df_final.pop("Scenario")
             first = df_final.pop("Model")
             df_final.insert(0, 'Scenario', second)

@@ -15,7 +15,7 @@ import os
 import time
 
 definition_dir = Path(__file__).parent / 'definitions'
-definition = nomenclature.DataStructureDefinition(definition_dir)
+definition = nomenclature.DataStructureDefinition(definition_dir, dimensions=["variable"])
 
 
 logging.basicConfig(level=logging.INFO)
@@ -88,7 +88,7 @@ def _generate_yearly_values(input_file, file_type: str = "gdx", generate_transmi
     dt.generate_emissions_values(data_wrapper)
 #    dt.generate_additional_emissions_values(data_wrapper)
     dt.generate_secondary_energy(data_wrapper)
-    dt.generate_exogenous_costs(data_wrapper)
+    #dt.generate_exogenous_costs(data_wrapper)
     dt.generate_detailed_costs(data_wrapper)
     dt.generate_co2_prices(data_wrapper)
 

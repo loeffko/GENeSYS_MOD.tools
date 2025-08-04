@@ -62,28 +62,33 @@ def loaddf_from_csv(file):
 definition_dir = Path(__file__).parent / 'definitions'
 
 def loadmap_iso2_countries():
-    with open(definition_dir/ 'region' / 'countries.yaml', 'r') as stream:
+    with open(Path(__file__).parent / 'mappings' / 'GENeSYS-MOD 4.0.yaml', 'r') as stream:
         country_codelist = yaml.load(stream, Loader=yaml.FullLoader)
 
-        transformed_codelist = {}
+        native_list = country_codelist['native_regions']
+
+        iso2_mapping = {k: v for d in native_list for k, v in d.items()}
+
+
+        #transformed_codelist = {}
 
         # Iterate over the list of countries and extract key-value pairs
-        for country_entry in country_codelist[0]['Countries']:
-            for country_name, country_data in country_entry.items():
-                # Remove the redundant 'countries' key inside the nested dictionary
-                country_data.pop('countries', None)
-                # Add the entry to the transformed dictionary
-                transformed_codelist[country_name] = country_data
+        # for country_entry in country_codelist[0]['Countries']:
+        #     for country_name, country_data in country_entry.items():
+        #         # Remove the redundant 'countries' key inside the nested dictionary
+        #         country_data.pop('countries', None)
+        #         # Add the entry to the transformed dictionary
+        #         transformed_codelist[country_name] = country_data
 
 #    countries = CodeList.from_directory(
 #        "region", path=definition_dir/'region', file="countries.yaml"
 #    )
-    iso2_mapping = dict(
-        [(transformed_codelist[c]['iso2'], c) for c in transformed_codelist]
-       # add alternative iso2 codes used by the European Commission to the mapping
-        + [(transformed_codelist[c]['iso2_alt'], c) for c in transformed_codelist
-           if 'iso2_alt' in transformed_codelist[c]]
-    )
+#     iso2_mapping = dict(
+#         [(transformed_codelist[c]['iso2'], c) for c in transformed_codelist]
+#        # add alternative iso2 codes used by the European Commission to the mapping
+#         + [(transformed_codelist[c]['iso2_alt'], c) for c in transformed_codelist
+#            if 'iso2_alt' in transformed_codelist[c]]
+#     )
 
 #    iso2_mapping = dict(
 #        [(countries[c]["iso3"], c) for c in countries]

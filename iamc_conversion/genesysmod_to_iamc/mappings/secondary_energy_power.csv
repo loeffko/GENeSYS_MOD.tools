@@ -1,4 +1,4 @@
-P_Coal_Hardcoal,Electricity|Coal|Hard coal|w/o CCS
+P_Coal_Hardcoal,Electricity|Coal|Hard Coal|w/o CCS
 P_Coal_Lignite,Electricity|Coal|Lignite|w/o CCS
 P_Nuclear,Electricity|Nuclear
 P_Oil,Electricity|Oil|w/o CCS
@@ -22,8 +22,8 @@ P_Wind_Onshore_Avg,Electricity|Wind|Onshore
 P_Wind_Onshore_Inf,Electricity|Wind|Onshore
 P_Wind_Onshore_Opt,Electricity|Wind|Onshore
 P_Biomass_CCS,Electricity|Biomass|w/ CCS
-P_Coal_Hardcoal_CCS,Electricity|Coal|w/ CCS
-P_Coal_Lignite_CCS,Electricity|Coal|w/ CCS
+P_Coal_Hardcoal_CCS,Electricity|Coal|Hard Coal|w/ CCS
+P_Coal_Lignite_CCS,Electricity|Coal|Lignite|w/ CCS
 HLI_Fuelcell,Electricity|Other
 HLI_Fuelcell,Electricity|Other
 X_Fuel_Cell,Electricity|Other
@@ -32,11 +32,11 @@ CHP_Gas_CCGT_Biogas,Electricity|Gas|CCGT|w/o CCS
 CHP_Gas_CCGT_Biogas_CCS,Electricity|Gas|CCGT|w/ CCS
 CHP_Gas_CCGT_Natural,Electricity|Gas|CCGT|w/o CCS
 CHP_Gas_CCGT_Natural_CCS,Electricity|Gas|CCGT|w/ CCS
-CHP_Gas_CCGT_SynGas,Electricity|Gas|Synthetic Methane|w/o CCS
+CHP_Gas_CCGT_SynGas,Electricity|Synthetic Methane|w/o CCS
 CHP_Biomass_Solid,Electricity|Biomass|w/o CCS
 CHP_Biomass_Solid_CCS,Electricity|Biomass|w/ CCS
-CHP_Coal_Hardcoal,Electricity|Coal|Hard coal|w/o CCS
-CHP_Coal_Hardcoal_CCS,Electricity|Coal|Hard coal|w/ CCS
+CHP_Coal_Hardcoal,Electricity|Coal|Hard Coal|w/o CCS
+CHP_Coal_Hardcoal_CCS,Electricity|Coal|Hard Coal|w/ CCS
 CHP_Coal_Lignite,Electricity|Coal|Lignite|w/o CCS
 CHP_Coal_Lignite_CCS,Electricity|Coal|Lignite|w/ CCS
 CHP_Oil,Electricity|Oil|w/o CCS

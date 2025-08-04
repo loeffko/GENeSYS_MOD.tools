@@ -1,4 +1,4 @@
-Battery|Lithium-Ion,4
-Battery|Redox Flow,4
-Compressed Air,16
-Hydro|Pumped Storage,100
+Electricity Storage|Lithium-Ion,4
+Electricity Storage|Redox Flow,4
+Electricity Storage|Compressed Air,16
+Electricity Storage|Pumped Storage,100
