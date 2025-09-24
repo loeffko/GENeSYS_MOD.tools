@@ -11,6 +11,7 @@ CHP_Gas_CCGT_Natural_CCS,Residential and Commercial|Gas|CCGT|w/ CCS
 CHP_Gas_CCGT_SynGas,Residential and Commercial|Synthetic Methane|w/o CCS
 CHP_Hydrogen_FuelCell,Residential and Commercial|Hydrogen
 CHP_Oil,Residential and Commercial|Oil
+CHP_WasteToEnergy,Residential and Commercial|Heat|Other
 HHI_BF_BOF,Industry|Coal|Hard Coal|w/o CCS
 HHI_BF_BOF_CCS,Industry|Coal|Hard Coal|w/ CCS
 HHI_Bio_BF_BOF,Industry|Biomass
@@ -38,6 +39,7 @@ HB_Heatpump_Ground,Residential and Commercial|Electricity|Heat Pump|Ground Sourc
 HB_Lignite,Residential and Commercial|Coal|Lignite|w/o CCS
 HB_Oil_Boiler,Residential and Commercial|Oil
 HB_Solar_Thermal,Residential and Commercial|Solar
+HB_Convert_DH,Residential and Commercial|Other
 HMHI_Biomass,Industry|Biomass
 HMHI_Gas,Industry|Gas
 HMHI_Gas_CCS,Industry|Gas
@@ -45,3 +47,6 @@ HMHI_HardCoal,Industry|Coal|Hard Coal|w/o CCS
 HMHI_HardCoal_CCS,Industry|Coal|Hard Coal|w/ CCS
 HMHI_Oil,Industry|Oil
 HMHI_Steam_Electric,Industry|Other
+HLI_Convert_DH,Industry|Other
+HMHI_H2,Industry|Hydrogen
+HMLI_Heatpump,Industry|Electricity

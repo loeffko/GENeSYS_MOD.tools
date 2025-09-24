@@ -43,6 +43,7 @@ P_Coal_Lignite_CCS,Electricity|Coal|Lignite|w/ CCS
 P_Biomass_CCS,Electricity|Biomass|w/ CCS
 CHP_Oil,Electricity|Oil|w/o CCS
 CHP_Hydrogen_FuelCell,Electricity|Hydrogen|Fuel Cell
+CHP_WasteToEnergy,Electricity|Other
 HB_Gas_Boiler,Heat|Residential and Commercial|Gas
 HB_Biomass,Heat|Residential and Commercial|Biomass
 HB_Hardcoal,Heat|Residential and Commercial|Coal|Hard Coal

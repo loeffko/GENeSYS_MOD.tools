@@ -9,9 +9,9 @@ FRT_Road_PHEV,Transportation|Freight|Road|PHEV
 FRT_Ship_Bio,Transportation|Freight|Maritime|Biofuels
 FRT_Ship_Conv,Transportation|Freight|Maritime|Oil
 FRT_Ship_LNG,Transportation|Freight|Maritime|LNG
-PSNG_Air_Bio,Transportation|Passenger|Air|Biofuels
-PSNG_Air_Conv,Transportation|Passenger|Air|Oil
-PSNG_Air_H2,Transportation|Passenger|Air|Hydrogen
+PSNG_Air_Bio,Transportation|Passenger|Aviation|Biofuels
+PSNG_Air_Conv,Transportation|Passenger|Aviation|Oil
+PSNG_Air_H2,Transportation|Passenger|Aviation|Hydrogen
 PSNG_Rail_Conv,Transportation|Passenger|Rail|Oil
 PSNG_Rail_Electric,Transportation|Passenger|Rail|Electric
 PSNG_Road_BEV,Transportation|Passenger|Road|Electric|BEV

@@ -1,25 +1,26 @@
 CHP_Biomass_Solid,Combined Heat and Power|Biomass|w/o CCS
 CHP_Biomass_Solid_CCS,Combined Heat and Power|Biomass|w/ CCS
-CHP_Coal_Hardcoal,Combined Heat and Power|Coal|Hard coal|w/o CCS
-CHP_Coal_Hardcoal_CCS,Combined Heat and Power|Coal|Hard coal|w/ CCS
+CHP_Coal_Hardcoal,Combined Heat and Power|Coal|Hard Coal|w/o CCS
+CHP_Coal_Hardcoal_CCS,Combined Heat and Power|Coal|Hard Coal|w/ CCS
 CHP_Coal_Lignite,Combined Heat and Power|Coal|Lignite|w/o CCS
 CHP_Coal_Lignite_CCS,Combined Heat and Power|Coal|Lignite|w/ CCS
-CHP_Gas_CCGT_Biogas,Combined Heat and Power|Gas|Biomethane|CCGT|w/o CCS
-CHP_Gas_CCGT_Biogas_CCS,Combined Heat and Power|Gas|Biomethane|CCGT|w/ CCS
-CHP_Gas_CCGT_Natural,Combined Heat and Power|Gas|Fossil|CCGT|w/o CCS
-CHP_Gas_CCGT_Natural_CCS,Combined Heat and Power|Gas|Fossil|CCGT|w/ CCS
-CHP_Gas_CCGT_SynGas,Combined Heat and Power|Gas|Synthetic Methane|CCGT|w/o CCS
+CHP_Gas_CCGT_Biogas,Combined Heat and Power|Biogas|CCGT|w/o CCS
+CHP_Gas_CCGT_Biogas_CCS,Combined Heat and Power|Biogas|CCGT|w/ CCS
+CHP_Gas_CCGT_Natural,Combined Heat and Power|Gas|CCGT|w/o CCS
+CHP_Gas_CCGT_Natural_CCS,Combined Heat and Power|Gas|CCGT|w/ CCS
+CHP_Gas_CCGT_SynGas,Combined Heat and Power|Synthetic Methane|w/o CCS
 CHP_Hydrogen_FuelCell,Combined Heat and Power|Hydrogen|Fuel Cell
-CHP_Oil,Combined Heat and Power|Oil|w/o CCS
-D_Battery_Li-Ion,Electricity|Battery|Lithium-Ion
-D_Battery_Redox,Electricity|Battery|Redox Flow
-D_CAES,Electricity|Compressed Air
-D_Gas_H2,Energy Storage System|Hydrogen|Salt Cavern
-D_Gas_Methane,Energy Storage System|Methane|Salt Cavern
-D_Heat_HLI,Energy Storage System|Heat|Industrial
-D_Heat_HB,Energy Storage System|Heat|Residential
-D_PHS,Electricity|Pumped Hydro Storage
-D_PHS_Residual,Electricity|Pumped Hydro Storage|Residual
+CHP_Oil,Combined Heat and Power|Oil|Steam Turbine|w/o CCS
+D_Battery_Li-Ion,Electricity|Electricity Storage|Lithium-Ion
+D_Battery_Redox,Electricity|Electricity Storage|Redox Flow
+D_CAES,Electricity|Electricity Storage|Compressed Air
+D_PHS,Electricity|Electricity Storage|Pumped Storage
+D_PHS_Residual,Electricity|Electricity Storage|Pumped Storage
+D_Gas_H2,Energy Storage|Hydrogen|Salt Cavern
+D_Gas_Methane,Energy Storage|Methane|Salt Cavern
+D_HLI_Tank_Large,Heat|Energy Storage|Large Water Tank
+D_HB_Tank_Small,Heat|Energy Storage|Small Water Tank
+D_HD_Pit,Heat|Energy Storage|Water Pit
 FRT_Rail_Conv,Transportation|Freight|Rail|Oil
 FRT_Rail_Electric,Transportation|Freight|Rail|Electric
 FRT_Road_BEV,Transportation|Freight|Road|Electric|Battery
@@ -31,55 +32,56 @@ FRT_Road_PHEV,Transportation|Freight|Road|Plugin Hybrid
 FRT_Ship_Bio,Transportation|Freight|Maritime|Biofuels
 FRT_Ship_Conv,Transportation|Freight|Maritime|Oil
 FRT_Ship_LNG,Transportation|Freight|Maritime|LNG
-HHI_BF_BOF,Heat|Industrial|Blast Furnace BOF|Coal|w/o CCS
-HHI_BF_BOF_CCS,Heat|Industrial|Blast Furnace BOF|Coal|w/ CCS
-HHI_Bio_BF_BOF,Heat|Industrial|Blast Furnace BOF|Biomass|w/o CCS
-HHI_DRI_EAF,Heat|Industrial|Electric Arc Furnace|DRI|w/o CCS
-HHI_DRI_EAF_CCS,Heat|Industrial|Electric Arc Furnace|DRI|w/ CCS
-HHI_H2DRI_EAF,Heat|Industrial|Electric Arc Furnace|DRI|Hydrogen|w/o CCS
-HHI_Molten_Electrolysis,Heat|Industrial|Molten Oxide Electrolysis
-HHI_Scrap_EAF,Heat|Industrial|Electric Arc Furnace|Scrap|w/o CCS
-HLI_Biomass,Heat|Industrial|Hot Water Boiler|Biomass|w/o CCS
-HLI_Direct_Electric,Heat|Industrial|Hot Water Boiler|Electric
-HLI_Gas_Boiler,Heat|Industrial|Hot Water Boiler|Gas|w/o CCS
-HLI_Geothermal,Heat|Industrial|Geothermal
-HLI_H2_Boiler,Heat|Industrial|Hot Water Boiler|Hydrogen
-HLI_Hardcoal,Heat|Industrial|Hot Water Boiler|Coal|Hard coal|w/o CCS
-HLI_Lignite,Heat|Industrial|Hot Water Boiler|Coal|Lignite|w/o CCS
-HLI_Oil_Boiler,Heat|Industrial|Hot Water Boiler|Oil|w/o CCS
-HLI_Solar_Thermal,Heat|Industrial|Solar
+HHI_BF_BOF,Heat|Industry|Blast Furnace BOF|Coal|w/o CCS
+HHI_BF_BOF_CCS,Heat|Industry|Blast Furnace BOF|Coal|w/ CCS
+HHI_Bio_BF_BOF,Heat|Industry|Blast Furnace BOF|Biomass|w/o CCS
+HHI_DRI_EAF,Heat|Industry|Electric Arc Furnace|DRI|w/o CCS
+HHI_DRI_EAF_CCS,Heat|Industry|Electric Arc Furnace|DRI|w/ CCS
+HHI_H2DRI_EAF,Heat|Industry|Electric Arc Furnace|DRI|Hydrogen|w/o CCS
+HHI_Molten_Electrolysis,Heat|Industry|Molten Oxide Electrolysis
+HHI_Scrap_EAF,Heat|Industry|Electric Arc Furnace|Scrap|w/o CCS
+HLI_Biomass,Heat|Industry|Hot Water Boiler|Biomass|w/o CCS
+HLI_Direct_Electric,Heat|Industry|Hot Water Boiler|Electric
+HLI_Gas_Boiler,Heat|Industry|Hot Water Boiler|Gas|w/o CCS
+HLI_Geothermal,Heat|Industry|Geothermal
+HLI_H2_Boiler,Heat|Industry|Hot Water Boiler|Hydrogen
+HLI_Hardcoal,Heat|Industry|Hot Water Boiler|Coal|Hard Coal|w/o CCS
+HLI_Lignite,Heat|Industry|Hot Water Boiler|Coal|Lignite|w/o CCS
+HLI_Oil_Boiler,Heat|Industry|Hot Water Boiler|Oil|w/o CCS
+HLI_Solar_Thermal,Heat|Industry|Solar
 HB_Biomass,Heat|Residential and Commercial|Biomass
 HB_Direct_Electric,Heat|Residential and Commercial|Electric
 HB_Gas_Boiler,Heat|Residential and Commercial|Gas
 HB_Geothermal,Heat|Residential and Commercial|Geothermal
 HB_H2_Boiler,Heat|Residential and Commercial|Hydrogen
-HB_Hardcoal,Heat|Residential and Commercial|Coal|Hard coal
+HB_Hardcoal,Heat|Residential and Commercial|Coal|Hard Coal
 HB_Heatpump_Aerial,Heat|Residential and Commercial|Heat Pump|Air
 HB_Heatpump_Ground,Heat|Residential and Commercial|Heat Pump|Ground
 HB_Lignite,Heat|Residential and Commercial|Coal|Lignite
 HB_Oil_Boiler,Heat|Residential and Commercial|Oil
 HB_Solar_Thermal,Heat|Residential and Commercial|Solar
-HMI_Biomass,Heat|Industrial|Steam Boiler|Biomass|w/o CCS
-HMI_H2,Heat|Industrial|Steam Boiler|Hydrogen
-HMI_Gas,Heat|Industrial|Steam Boiler|Gas|w/o CCS
-HMI_Gas_CCS,Heat|Industrial|Steam Boiler|Gas|w/ CCS
-HMI_HardCoal,Heat|Industrial|Steam Boiler|Coal|Hard coal|w/o CCS
-HMI_HardCoal_CCS,Heat|Industrial|Steam Boiler|Coal|Hard coal|w/ CCS
-HMI_Oil,Heat|Industrial|Steam Boiler|Oil|w/o CCS
-HMI_Steam_Electric,Heat|Industrial|Steam Boiler|Electric
+HMHI_Biomass,Heat|Industry|Steam Boiler|Biomass|w/o CCS
+HMHI_H2,Heat|Industry|Steam Boiler|Hydrogen
+HMHI_Gas,Heat|Industry|Steam Boiler|Gas|w/o CCS
+HMHI_Gas_CCS,Heat|Industry|Steam Boiler|Gas|w/ CCS
+HMHI_HardCoal,Heat|Industry|Steam Boiler|Coal|Hard Coal|w/o CCS
+HMHI_HardCoal_CCS,Heat|Industry|Steam Boiler|Coal|Hard Coal|w/ CCS
+HMHI_Oil,Heat|Industry|Steam Boiler|Oil|w/o CCS
+HMHI_Steam_Electric,Heat|Industry|Steam Boiler|Electric
+HMLI_Heatpump,Heat|Industry|Heat Pump
 P_Biomass,Electricity|Biomass|w/o CCS
 P_Biomass_CCS,Electricity|Biomass|w/ CCS
-P_Coal_Hardcoal,Electricity|Coal|Hard coal|w/o CCS
-P_Coal_Hardcoal_CCS,Electricity|Coal|Hard coal|w/ CCS
+P_Coal_Hardcoal,Electricity|Coal|Hard Coal|w/o CCS
+P_Coal_Hardcoal_CCS,Electricity|Coal|Hard Coal|w/ CCS
 P_Coal_Lignite,Electricity|Coal|Lignite|w/o CCS
 P_Coal_Lignite_CCS,Electricity|Coal|Lignite|w/ CCS
 P_Gas_CCGT,Electricity|Gas|CCGT|w/o CCS
-P_Gas_Engines,Electricity|Gas|Fossil|Gas Engines
+P_Gas_Engines,Electricity|Gas|Internal Combustion
 P_Gas_OCGT,Electricity|Gas|OCGT|w/o CCS
 P_Gas_CCS,Electricity|Gas|CCGT|w/ CCS
-P_H2_OCGT,Electricity|Hydrogen|OCGT|w/o CCS
+P_H2_OCGT,Electricity|Hydrogen|OCGT
 P_Nuclear,Electricity|Nuclear
-P_Oil,Electricity|Oil|w/o CCS
+P_Oil,Electricity|Oil|Internal Combustion|w/o CCS
 PSNG_Air_Bio,Transportation|Passenger|Air|Biofuels
 PSNG_Air_Conv,Transportation|Passenger|Air|Oil
 PSNG_Air_H2,Transportation|Passenger|Air|Hydrogen
@@ -90,7 +92,7 @@ PSNG_Road_H2,Transportation|Passenger|Road|Electric|Fuel Cell
 PSNG_Road_ICE,Transportation|Passenger|Road|Internal Combustion Engine|Oil
 PSNG_Road_LNG,Transportation|Passenger|Road|Internal Combustion Engine|LNG
 PSNG_Road_PHEV,Transportation|Passenger|Road|Plugin Hybrid
-R_Coal_Hardcoal,Resource|Coal|Hard coal
+R_Coal_Hardcoal,Resource|Coal|Hard Coal
 R_Coal_Lignite,Resource|Coal|Lignite
 R_Gas,Resource|Gas|Fossil
 R_Nuclear,Resource|Nuclear
@@ -109,7 +111,7 @@ P_PV_Utility_Avg,Electricity|Solar|PV|Utility|Average
 P_PV_Utility_Inf,Electricity|Solar|PV|Utility|Inferior
 P_PV_Utility_Opt,Electricity|Solar|PV|Utility|Optimal
 P_PV_Utility_Tracking,Electricity|Solar|PV|Utility|Tracking
-R_Residues,Resource|Biomass|Waste
+R_Residues,Resource|Biomass|Residues
 R_Roundwood,Resource|Biomass|Roundwood
 P_Wind_Offshore_Deep,Electricity|Wind|Offshore|Deep
 P_Wind_Offshore_Shallow,Electricity|Wind|Offshore|Shallow
@@ -126,18 +128,19 @@ X_Gasifier,Conversion|Gasification Plant
 X_Liquifier,Conversion|Liquefication Plant
 X_Methanation,Conversion|Methanation Plant
 X_Powerfuel,Conversion|E-Fuel Plant
-X_SMR,Conversion|Steam Methane Reforming|/w/o CCS
+X_SMR,Conversion|Steam Methane Reforming|w/o CCS
 X_ATR_CCS,Conversion|Autothermal Reforming|w/ CCS
 Z_Import_Gas,Import|Gas|Fossil
 Z_Import_H2,Import|Hydrogen
-Z_Import_Hardcoal,Import|Coal|Hard coal
+Z_Import_Hardcoal,Import|Coal|Hard Coal
 Z_Import_LNG,Import|LNG
 Z_Import_Oil,Import|Oil
-S_Battery_Li-Ion,Energy Storage System|Battery|Lithium-Ion
-S_Battery_Redox,Energy Storage System|Redox Flow
-S_CAES,Energy Storage System|Compressed Air
-S_Gas_H2,Energy Storage System|Hydrogen|Salt Cavern
-S_Gas_Methane,Energy Storage System|Methane|Salt Cavern
-S_Heat_HLI,Energy Storage System|Heat|Industrial
-S_Heat_HB,Energy Storage System|Heat|Residential
-S_PHS,Energy Storage System|Pumped Hydro Storage
+S_Battery_Li-Ion,Electricity|Electricity Storage|Lithium-Ion
+S_Battery_Redox,Electricity|Electricity Storage|Redox Flow
+S_CAES,Electricity|Electricity Storage|Compressed Air
+S_Gas_H2,Energy Storage|Hydrogen|Salt Cavern
+S_Gas_Methane,Energy Storage|Methane|Salt Cavern
+S_HLI_Tank_Large,Heat|Energy Storage|Large Water Tank
+S_HB_Tank_Small,Heat|Energy Storage|Small Water Tank
+S_PHS,Electricity|Electricity Storage|Pumped Storage
+S_HD_Pit,Heat|Energy Storage|Water Pit

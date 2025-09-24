@@ -9,9 +9,9 @@ Transportation|Freight|Road|Plugin Hybrid,Gtkm/yr
 Transportation|Freight|Maritime|Biofuels,Gtkm/yr
 Transportation|Freight|Maritime|Oil,Gtkm/yr
 Transportation|Freight|Maritime|LNG,Gtkm/yr
-Transportation|Passenger|Air|Biofuels,Gpkm/yr
-Transportation|Passenger|Air|Oil,Gpkm/yr
-Transportation|Passenger|Air|Hydrogen,Gpkm/yr
+Transportation|Passenger|Aviation|Biofuels,Gpkm/yr
+Transportation|Passenger|Aviation|Oil,Gpkm/yr
+Transportation|Passenger|Aviation|Hydrogen,Gpkm/yr
 Transportation|Passenger|Rail|Oil,Gpkm/yr
 Transportation|Passenger|Rail|Electric,Gpkm/yr
 Transportation|Passenger|Road|Electric|Battery,Gpkm/yr

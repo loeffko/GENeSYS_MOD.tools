@@ -9,10 +9,10 @@
     description: Short-term operational cost for generating electricity from {Electricity Source By Technology}
       including fuel cost
     unit: EUR/MWh
-# - Variable Cost|Electricity|{Electricity Source}:
-#     description: Short-term operational cost for generating electricity from {Electricity Source}
-#       including fuel cost
-    # unit: EUR/MWh
+- Variable Cost|Electricity|{Electricity Source}:
+    description: Short-term operational cost for generating electricity from {Electricity Source}
+      including fuel cost
+    unit: EUR/MWh
 - Capacity|Electricity|{Electricity Source By Technology}:
     description: Installed (available) capacity of {Electricity Source By Technology}
     unit: GW
@@ -22,9 +22,9 @@
 - Emission Rate|CO2|Energy|Supply|Electricity|{Electricity Source By Technology}:
     description: CO2 emission rate from {Electricity Source By Technology}
     unit: t CO2/MWh
-# - Emission Rate|CO2|Energy|Supply|Electricity|{Electricity Source}:
-#     description: CO2 emission rate from {Electricity Source}
-#     unit: t CO2/MWh
+- Emission Rate|CO2|Energy|Supply|Electricity|{Electricity Source}:
+    description: CO2 emission rate from {Electricity Source}
+    unit: t CO2/MWh
 - Discount Rate|Electricity:
     description: Discount rate applied to electricity-related investments
     unit: '%'

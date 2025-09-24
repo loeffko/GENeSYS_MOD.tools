@@ -18,7 +18,7 @@ OE_SUBANNUAL_FORMAT = lambda x: x.strftime("%m-%d %H:%M%z").replace("+0100", "+0
 
 def main(df: pyam.IamDataFrame) -> pyam.IamDataFrame:
     """Main function for validation and processing"""
-    logger.info("Starting openENTRANCE timeseries-upload processing workflow...")
+    logger.info("Starting GENeSYS-MOD timeseries-upload processing workflow...")
 
     if "subannual" in df.dimensions or df.time_col == "time":
         dimensions = ["variable", "subannual"]

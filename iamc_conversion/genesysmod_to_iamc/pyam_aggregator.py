@@ -34,9 +34,11 @@ def generate_idataframe(data_wrapper, filter_only_yearly_values=False):
 
     idataframe.aggregate(variable='Final Energy|Industry|Liquids', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Industry|Solids', append=True, recursive=False)
+    idataframe.aggregate(variable='Final Energy|Industry|Gases', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Industry', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Residential and Commercial|Liquids', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Residential and Commercial|Solids', append=True, recursive=False)
+    idataframe.aggregate(variable='Final Energy|Residential and Commercial|Gases', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Residential and Commercial', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Transportation|Liquids', append=True, recursive=False)
     idataframe.aggregate(variable='Final Energy|Transportation', append=True, recursive=False)
@@ -106,13 +108,13 @@ def generate_idataframe(data_wrapper, filter_only_yearly_values=False):
                                      'Final Energy|Industry|Solids|Coal'], append=True, recursive=False)
 
 
-    idataframe.aggregate(variable='Final Energy|Industry|Heat',
-                         components=['Final Energy|Industry'], append=True, recursive=False)
+    #idataframe.aggregate(variable='Final Energy|Industry|Heat',
+    #                     components=['Final Energy|Industry'], append=True, recursive=False)
 
 
 
-    idataframe.aggregate(variable='Final Energy|Residential and Commercial|Heat',
-                         components=['Final Energy|Residential and Commercial'], append=True, recursive=False)
+    #idataframe.aggregate(variable='Final Energy|Residential and Commercial|Heat',
+    #                     components=['Final Energy|Residential and Commercial'], append=True, recursive=False)
 
 
     idataframe.aggregate_region(variable='Final Energy*', subregions=['EU27 (excl. Malta & Cyprus)','NO','NONEU_Balkan','TR','UK','CH'], append=True)
@@ -147,7 +149,9 @@ def generate_idataframe(data_wrapper, filter_only_yearly_values=False):
     idataframe.aggregate(variable='Capacity|Electricity|Oil', append=True, recursive=False)
     idataframe.aggregate(variable='Capacity|Electricity', append=True, recursive=False)
     idataframe.aggregate(variable='Capacity|Heat|Residential and Commercial', append=True, recursive=False)
+    #idataframe.aggregate(variable='Capacity|Heat|Residential and Commercial', append=True, recursive=False)
     idataframe.aggregate(variable='Capacity|Heat|Industry', append=True, recursive=False)
+    idataframe.aggregate(variable='Capacity|Heat|Industry|Coal|Hard Coal', append=True, recursive=False)
     idataframe.aggregate_region(variable='Capacity|*', subregions=['EU27 (excl. Malta & Cyprus)','NO','NONEU_Balkan','TR','UK','CH'], append=True)
 
     #idataframe.aggregate(variable='Maximum Storage|Electricity', append=True, recursive=False)
@@ -188,6 +192,8 @@ def generate_idataframe(data_wrapper, filter_only_yearly_values=False):
     idataframe.aggregate(variable='Secondary Energy|Heat|Coal|Hard Coal', append=True, recursive=False)
     idataframe.aggregate(variable='Secondary Energy|Heat|Coal|Lignite', append=True, recursive=False)
     idataframe.aggregate(variable='Secondary Energy|Heat|Coal', append=True, recursive=False)
+    #idataframe.aggregate(variable='Secondary Energy|Heat|Industry', append=True, recursive=False)
+    #idataframe.aggregate(variable='Secondary Energy|Heat|Residential and Commercial', append=True, recursive=False)
     idataframe.aggregate(variable='Secondary Energy|Heat', append=True, recursive=False)
     idataframe.aggregate(variable='Secondary Energy|Hydrogen', append=True, recursive=False)
     idataframe.aggregate(variable='Secondary Energy|Liquids', append=True, recursive=False)

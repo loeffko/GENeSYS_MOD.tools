@@ -585,7 +585,7 @@ def _generate_exogenous_costs_values(data_wrapper: dw.DataWrapper, cost_type: st
 # so far only LCOE
 def _generate_detailed_costs_values(data_wrapper: dw.DataWrapper, cost_type:str):
     map_cost_technology = dr.loadmap_from_csv('costs')
-    map_storage_technology = dr.loadmap_from_csv('storages')
+    #map_storage_technology = dr.loadmap_from_csv('storages')
 
     cost_values = data_wrapper.detailed_cost_values.copy()
     cost_values = cost_values[cost_values['type'] == cost_type]
@@ -595,7 +595,7 @@ def _generate_detailed_costs_values(data_wrapper: dw.DataWrapper, cost_type:str)
     for entry in map_cost_technology:
         if cost_type == "Levelized Costs [Capex]":
             cost_values = cost_values.replace({'technology': entry},
-                                          "Levelized Cost|Capex" '|' + map_cost_technology[entry])
+                                          "Levelized Cost|Capital Expenditure" '|' + map_cost_technology[entry])
         elif cost_type == "Levelized Costs [Emissions]":
             cost_values = cost_values.replace({'technology': entry},
                                               "Levelized Cost|Emissions" '|' + map_cost_technology[entry])
@@ -611,25 +611,25 @@ def _generate_detailed_costs_values(data_wrapper: dw.DataWrapper, cost_type:str)
 
 
     #add LCOE for storages
-    if cost_type == "Levelized Costs [Total]":
-        storage_values = data_wrapper.detailed_cost_values.copy()
-        storage_values = storage_values[storage_values['type'] == cost_type]
-        storage_values = storage_values[storage_values['technology'].isin(map_storage_technology.keys())]
-
-
-        for entry in map_storage_technology:
-            if entry == 'D_PHS':
-                storage_values = storage_values.replace({'technology': entry},
-                                                        'Levelized Cost|Generation|Electricity|' + map_storage_technology[entry])
-            else:
-                storage_values = storage_values.replace({'technology': entry},
-                                                        'Levelized Cost|Electricity|' + map_storage_technology[entry])
-
-        cost_values = pd.concat([cost_values, storage_values], ignore_index=True)
+    # if cost_type == "Levelized Costs [Total]":
+    #     storage_values = data_wrapper.detailed_cost_values.copy()
+    #     storage_values = storage_values[storage_values['type'] == cost_type]
+    #     storage_values = storage_values[storage_values['technology'].isin(map_storage_technology.keys())]
+    #
+    #
+    #     for entry in map_storage_technology:
+    #         if entry == 'D_PHS':
+    #             storage_values = storage_values.replace({'technology': entry},
+    #                                                     'Levelized Cost|Generation|Electricity|' + map_storage_technology[entry])
+    #         else:
+    #             storage_values = storage_values.replace({'technology': entry},
+    #                                                     'Levelized Cost|Electricity|' + map_storage_technology[entry])
+    #
+    #     cost_values = pd.concat([cost_values, storage_values], ignore_index=True)
 
 
     cost_values['model'] = DEF_MODEL_AND_VERSION
-    cost_values['unit'] = 'MEUR_2020/PJ'
+    cost_values['unit'] = 'million EUR_2020/PJ'
 
     cost_values['scenario'] = data_wrapper.capacity_values['scenario'][0]
     cost_values = _set_scenarios(cost_values)

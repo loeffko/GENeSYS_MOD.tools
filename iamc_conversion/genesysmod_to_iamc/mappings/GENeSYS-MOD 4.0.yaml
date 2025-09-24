@@ -10,7 +10,7 @@ native_regions:
  - BG: Bulgaria
  - CH: Switzerland
  - CY: Cyprus
- - CZ: Czech Republic
+ - CZ: Czechia
  - DE: Germany
  - DK: Denmark
  - ES: Spain
@@ -28,14 +28,14 @@ native_regions:
  - ME: Montenegro
  - MK: North Macedonia
  - MT: Malta
- - NL: The Netherlands
+ - NL: Netherlands
  - "NO": Norway
  - NONEU_Balkan: Non-EU-Balkans
  - PL: Poland
  - PT: Portugal
  - RO: Romania
  - RS: Serbia
- - RU: Russia
+ - RU: Russian Federation
  - SK: Slovakia
  - SI: Slovenia
  - SE: Sweden

@@ -77,6 +77,7 @@ CHP_Coal_Lignite,Emissions|CO2|Energy|Demand|Residential and Commercial
 CHP_Coal_Lignite_CCS,Emissions|CO2|Energy|Demand|Residential and Commercial
 CHP_Oil,Emissions|CO2|Energy|Demand|Residential and Commercial
 CHP_Hydrogen_FuelCell,Emissions|CO2|Energy|Demand|Residential and Commercial
+CHP_WasteToEnergy,Emissions|CO2|Energy|Demand|Residential and Commercial
 CHP_Gas_CCGT_Biogas,Emissions|CO2|Energy|Demand|Industry
 CHP_Gas_CCGT_Biogas_CCS,Emissions|CO2|Energy|Demand|Industry
 CHP_Gas_CCGT_Natural,Emissions|CO2|Energy|Demand|Industry
@@ -90,6 +91,7 @@ CHP_Coal_Lignite,Emissions|CO2|Energy|Demand|Industry
 CHP_Coal_Lignite_CCS,Emissions|CO2|Energy|Demand|Industry
 CHP_Oil,Emissions|CO2|Energy|Demand|Industry
 CHP_Hydrogen_FuelCell,Emissions|CO2|Energy|Demand|Industry
+CHP_WasteToEnergy,Emissions|CO2|Energy|Demand|Industry
 P_Gas_CCGT,Emissions|CO2|Energy|Supply|Electricity
 P_Gas_Engines,Emissions|CO2|Energy|Supply|Electricity
 P_Gas_OCGT,Emissions|CO2|Energy|Supply|Electricity

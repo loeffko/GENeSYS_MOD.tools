@@ -5,7 +5,3 @@
     tier: 1
     drop_negative_weights: false
     weight: Emissions|CO2
-
-- Capacity|Transportation|{Transportation Sector}|{Transport}:
-    description: Transportation fleet
-    unit: Gvkm
