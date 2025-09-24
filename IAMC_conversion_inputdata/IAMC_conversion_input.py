@@ -1,11 +1,24 @@
 import os
 import pandas as pd
+from nomenclature import DataStructureDefinition, RegionProcessor, process
+from pathlib import Path
+import pyam
+import yaml
+
+
+here = Path(__file__).absolute().parent
+
+
+
+switch_process_definitions = 0
+
 
 # Define paths using the parent directory
 data_folder_path = './Input/'
 rename_mapping_technologies_path = './Mapping/IAMC_mappings_technolgies.csv'
 rename_mapping_fuels_path = './Mapping/IAMC_mappings_fuels.csv'
 rename_mapping_regions_path = './Mapping/IAMC_mappings_regions.csv'
+connection_path = './definitions/region/connections/connections.yaml'
 
 
 # Define the mapping of old technology names to new technology names from csv file
@@ -13,13 +26,21 @@ rename_mapping_technologies = pd.read_csv(rename_mapping_technologies_path, inde
 rename_mapping_fuels = pd.read_csv(rename_mapping_fuels_path, index_col=0, header=None).squeeze("columns").to_dict()
 rename_mapping_regions = pd.read_csv(rename_mapping_regions_path, index_col=0, header=None).squeeze("columns").to_dict()
 
+# Define connections code list
+with open(connection_path, "r") as f:
+    data = yaml.safe_load(f)
+
+connections = set()
+for block in data:
+    if "Connections" in block:
+        for conn in block["Connections"]:
+            connections.add(conn)
 
 # Function to rename technologies in CSV files in the data folder
 def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mapping_fuels, rename_mapping_regions):
 
     # Create regions list
     regions = ["AT","BE","BG","CH","CZ","DE","DK","EE","ES","FI","FR","GR","HR","HU","IE","IT","LT","LU","LV","NL","NO","PL","PT","RO","SE","SI","SK","TR","UK","NONEU_Balkan","World"]
-
     columns = ["Region", "Variable", "Unit", 2018, 2025, 2030, 2035, 2040, 2045, 2050, 2055, 2060]
     df_final_combined = pd.DataFrame(columns=[["Model", "Scenario", "Region", "Variable", "Unit", 2018, 2025, 2030, 2035, 2040, 2045, 2050, 2055, 2060]])
 
@@ -133,11 +154,9 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
                 if item == "Par_AvailabilityFactor":
                     df["Unit"] = "Fraction"
-                    df["Variable"] = "Maximum Utilization|" + df["Technology"]
+                    df["Variable"] = "Availability Factor|" + df["Technology"]
 
                 elif item in ["Par_CapitalCost","Par_FixedCost"]:
-
-                    df["Unit"] = "EUR_2020/kW"
 
                     df = df[df["Year"] != 2021]
 
@@ -145,6 +164,10 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                         df["Variable"] = "Fixed Cost|" + df["Technology"]
                     elif item == "Par_CapitalCost":
                         df["Variable"] = "Capital Cost|" + df["Technology"]
+
+                    df["Unit"] = "EUR_2020/kW"
+
+                    df.loc[df["Variable"].str.contains("Transportation", na=False), "Unit"] = "EUR_2020/kvkm"
 
                 elif item == "Par_CapitalCostStorage":
                     df["Unit"] = "EUR_2020/GJ"
@@ -169,7 +192,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
                 elif item == "Par_StorageE2PRatio":
                     df["Year"] = 2060
-                    df["Unit"] = "PJ/GW"
+                    df["Unit"] = "GWh/GW"
                     df["Variable"] = "Energy to Power Ratio|" + df["Storage"]
 
                     df_list = []
@@ -196,7 +219,11 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 df = df[df["Fuel"].isin(rename_mapping_fuels.keys())]
                 df["Fuel"] = df["Fuel"].replace(rename_mapping_fuels)
 
-                df["Region"] = df["Region"] + ">" +df["Region2"]
+                connection_col = df["Region"] + ">" +df["Region2"]
+
+                df = df[connection_col.isin(connections)]
+
+                df["Region"] = connection_col
 
                 if item == "Par_TradeCapacityGrowthCosts":
                     df.loc[df["Fuel"] == "Electricity", "Unit"] = "EUR_2020/kWkm"
@@ -213,7 +240,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                     df["Year"] = 2060
 
                 else:
-                    df["Variable"] = "Network|Total Capacity|" + df["Fuel"]
+                    df["Variable"] = "Network|" + df["Fuel"] + "|Capacity"
                     df = df[df["Year"] != 2021]
 
 
@@ -261,8 +288,10 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 df = df[df["Fuel"].isin(rename_mapping_fuels.keys())]
                 df["Fuel"] = df["Fuel"].replace(rename_mapping_technologies)
 
-                df["Unit"] = "MtCO2/PJ"
-                df["Variable"] = "Emissions|Carbon Content|" + df["Fuel"]
+                df["Value"] = df["Value"]*3.6
+
+                df["Unit"] = "t CO2/MWh"
+                df["Variable"] = "Emissions|CO2 Factor|" + df["Fuel"]
                 df["Year"] = 2018
 
                 df_list = []
@@ -286,7 +315,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
             if item == "Par_ModelPeriodEmissionLimit":
 
-                df['Region'] = "Europe"
+                df['Region'] = "Total"
                 df['Variable'] = 'Emissions|Total Budget'
                 df['Unit'] = 'Mt CO2'
                 df["Year"] = 2060
@@ -345,8 +374,8 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
 
             if item == "Par_RegionalCCSLimit":
 
-                df["Unit"] = "Mt"
-                df["Variable"] = "Emissions|Total Carbon Storage Potential"
+                df["Unit"] = "Mt CO2"
+                df["Variable"] = "Emissions|Total CO2 Storage Potential"
                 df["Year"] = 2060
 
                 df_temp = df.pivot(index=['Region', 'Variable', 'Unit'], columns='Year', values='Value')
@@ -363,7 +392,7 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 df["Fuel"] = df["Fuel"].replace(rename_mapping_fuels)
                 df = df[(df["Year"] != 2019) & (df["Year"] != 2021)]
 
-                df["Unit"] = "Percentage"
+                df["Unit"] = "Fraction"
 
                 df["Variable"] = "Renewable Share Target|" + df["Fuel"]
 
@@ -530,7 +559,18 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 df = df[df["Technology"].isin(rename_mapping_technologies.keys())]
                 df["Technology"] = df["Technology"].replace(rename_mapping_technologies)
 
-                df["Unit"] = "EUR_2020/GJ"
+                df["Value"] = df["Value"]*3.6
+
+                df["Unit"] = "EUR_2020/MWh"
+
+                df.loc[df["Technology"].str.contains("Freight"), "Value"] = df.loc[df["Technology"].str.contains(
+                    "Freight"), "Value"] / 3.6
+                df.loc[df["Technology"].str.contains("Passenger"), "Value"] = df.loc[df["Technology"].str.contains(
+                    "Passenger"), "Value"] / 3.6
+
+                df.loc[df["Technology"].str.contains("Freight"), "Unit"] = "EUR_2020/ktkm"
+                df.loc[df["Technology"].str.contains("Passenger"), "Unit"] = "EUR_2020/kpkm"
+
                 df["Variable"] = "Variable Cost|" + df["Technology"]
 
                 df = df[(df["Mode_of_operation"] == 1) & (df["Year"] != 2021)]
@@ -592,17 +632,27 @@ def iamc_conversion(data_folder_path, rename_mapping_technologies, rename_mappin
                 print(f'Successfully converted {item}')
 
 
-            scenario = file.partition(".")[0]
-            df_final["Model"] = "GENeSYS-MOD 4.0"
-            df_final["Scenario"] = scenario + " v1.1.0"
-            second = df_final.pop("Scenario")
-            first = df_final.pop("Model")
-            df_final.insert(0, 'Scenario', second)
-            df_final.insert(0, 'Model', first)
-            #df_final.drop(columns=[2020], axis=1)
-            df_final["Region"] = df_final["Region"].replace(rename_mapping_regions)
-            df_final.reset_index()
-            df_final.to_csv("./Output/"+scenario+".csv")
+        scenario = file.partition(".")[0]
+        df_final["Model"] = "GENeSYS-MOD 4.0"
+        df_final["Scenario"] = scenario + " v1.2.0"
+        second = df_final.pop("Scenario")
+        first = df_final.pop("Model")
+        df_final.insert(0, 'Scenario', second)
+        df_final.insert(0, 'Model', first)
+        #df_final.drop(columns=[2020], axis=1)
+        df_final["Region"] = df_final["Region"].replace(rename_mapping_regions)
+        df_final.reset_index()
+
+        if switch_process_definitions == 1:
+            df_final = pyam.IamDataFrame(df_final)
+
+            definition_region = DataStructureDefinition(here / "definitions", dimensions=["variable", "region"])
+            definition = DataStructureDefinition(here / "definitions", dimensions=["region", "variable"])
+            processor = RegionProcessor.from_directory(here / "Mapping", definition_region)
+
+            df_final = process(df_final, definition, dimensions=["region", "variable"], processor=None)
+
+        df_final.to_csv("./Output/"+scenario+".csv")
 
 
 
