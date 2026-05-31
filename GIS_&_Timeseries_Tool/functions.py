@@ -21,11 +21,13 @@ import cartopy.io.shapereader as shpreader
 import xarray as xr
 import atlite
 from atlite.resource import get_windturbineconfig, windturbine_smooth
-from atlite.gis import shape_availability, ExclusionContainer 
+from atlite.gis import shape_availability, ExclusionContainer
+from atlite.gis import get_coords as atlite_get_coords  # local get_coords below shadows the name
 
 import logging
 import warnings
 import timeit
+import gc
 
 warnings.simplefilter('ignore')
 logging.captureWarnings(False)
@@ -35,17 +37,114 @@ logging.basicConfig(level=logging.INFO)
 ###########################
 ## preparing coordinates ##
 ###########################
+def _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_file=None):
+    """Coordinate assignment for explicit region polygons (a 'region' column).
+
+    Onshore cells are the cutout cells inside a region polygon. Offshore cells
+    are cells inside the EEZ (offshore_file) but outside every region polygon,
+    each assigned to the nearest onshore region. Cells are pre-filtered to the
+    region+EEZ bounding box first so this stays fast at finer resolutions.
+
+    If bathymetry_file is given, each offshore cell also gets a 'depth' column
+    (metres below sea level) sampled from that grid, used to classify foundation
+    type (fixed vs floating) instead of distance.
+    """
+    gdf_polygons = gdf_polygons.to_crs("EPSG:4326")[["region", "geometry"]].copy()
+    gdf_polygons["_rid"] = range(len(gdf_polygons))
+
+    coords_raw_df = cutout.data[["x", "y"]].to_dataframe().reset_index()[["x", "y"]]
+    pts = gpd.GeoDataFrame(
+        coords_raw_df,
+        geometry=gpd.points_from_xy(coords_raw_df["x"], coords_raw_df["y"]),
+        crs="EPSG:4326",
+    )
+
+    # restrict cutout cells to the area of interest (regions + offshore) for speed
+    minx, miny, maxx, maxy = gdf_polygons.total_bounds
+    eez = None
+    if offshore_file is not None:
+        eez = gpd.read_file(offshore_file).to_crs("EPSG:4326")[["geometry"]]
+        ex = eez.total_bounds
+        minx, miny = min(minx, ex[0]), min(miny, ex[1])
+        maxx, maxy = max(maxx, ex[2]), max(maxy, ex[3])
+    pts = pts.cx[minx:maxx, miny:maxy]
+
+    # onshore: cutout cells lying inside a region polygon
+    onshore = gpd.sjoin(pts, gdf_polygons[["region", "geometry"]], how="inner", predicate="within")
+    onshore = onshore.drop_duplicates(subset=["x", "y"])
+    onshore["coords"] = onshore["y"].astype(str) + ", " + onshore["x"].astype(str)
+    coords_onshore = onshore[["x", "y", "coords", "region"]].copy()
+    if regions:
+        coords_onshore = coords_onshore[coords_onshore["region"].isin(regions)]
+    coords_onshore = coords_onshore.reset_index(drop=True)
+
+    empty_offshore = gpd.GeoDataFrame(columns=["x", "y", "coords", "region", "distance"])
+    if eez is None:
+        print("Warning: no offshore_file provided; offshore coordinates skipped")
+        return coords_onshore, empty_offshore
+
+    # offshore: cells inside the EEZ but outside every region polygon
+    tagged = gpd.sjoin(pts, gdf_polygons[["_rid", "geometry"]], how="left", predicate="within")
+    sea = tagged[tagged["_rid"].isna()][["x", "y", "geometry"]].drop_duplicates(subset=["x", "y"])
+    sea = gpd.sjoin(sea, eez, how="inner", predicate="within").drop_duplicates(subset=["x", "y"])
+    coords_offshore = sea[["x", "y"]].reset_index(drop=True)
+
+    if coords_offshore.empty or coords_onshore.empty:
+        print("Warning: No offshore coordinates in the selected cutout")
+        return coords_onshore, empty_offshore
+
+    coords_offshore["coords"] = coords_offshore["y"].astype(str) + ", " + coords_offshore["x"].astype(str)
+
+    # assign each offshore cell to the nearest onshore region (distance in nm).
+    # haversine expects [lat, lon] == [y, x]; distance = arc * earth_radius_km / km_per_nm
+    tree = BallTree(np.deg2rad(coords_onshore[["y", "x"]].values), metric="haversine")
+    distances, index = tree.query(np.deg2rad(coords_offshore[["y", "x"]].values))
+    coords_offshore["region"] = coords_onshore["region"].values[index.flatten()]
+    coords_offshore["distance"] = distances.flatten() * 6371.0 / 1.852
+
+    out_cols = ["x", "y", "coords", "region", "distance"]
+    if bathymetry_file is not None:
+        # nearest bathymetry sample per offshore cell; depth = metres below sea level.
+        # Auto-detect variable + coord names so different products work unchanged:
+        # the US file uses z / latitude / longitude, GEBCO uses elevation / lat / lon.
+        bds = xr.open_dataset(bathymetry_file)
+        zname = next((v for v in ("z", "elevation", "Band1") if v in bds.data_vars),
+                     list(bds.data_vars)[0])
+        latname = "latitude" if "latitude" in bds.coords else "lat"
+        lonname = "longitude" if "longitude" in bds.coords else "lon"
+        z = bds[zname].sel(
+            **{latname: xr.DataArray(coords_offshore["y"].values, dims="p"),
+               lonname: xr.DataArray(coords_offshore["x"].values, dims="p")},
+            method="nearest",
+        ).values
+        bds.close()
+        coords_offshore["depth"] = np.round(-z.astype(float), 1)
+        out_cols.append("depth")
+
+    return coords_onshore, coords_offshore[out_cols]
+
+
 def get_coords(
         cutout,
         regions,
         geo_file,
-        admin
+        admin=0,
+        offshore_file=None,
+        bathymetry_file=None
 ):
+
+    gdf_polygons = gpd.read_file(geo_file)
+
+    # Custom-region mode: geo_file carries explicit region polygons (a 'region'
+    # column) rather than country ISO codes. Offshore cells are bounded by the
+    # EEZ in offshore_file and (optionally) classified by depth from
+    # bathymetry_file. Falls back to the ISO/admin logic when the file is the
+    # natural-earth data (has an 'iso_a2' column).
+    if ("region" in gdf_polygons.columns) and ("iso_a2" not in gdf_polygons.columns):
+        return _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_file)
 
     coords_raw_df = cutout.data[["x", "y"]].to_dataframe().reset_index()
     coords_raw = coords_raw_df[["x", "y"]].values.tolist()
-
-    gdf_polygons = gpd.read_file(geo_file)
 
     geometry = [Point(xy) for xy in coords_raw]
     gdf_points = gpd.GeoDataFrame(geometry=geometry)
@@ -121,8 +220,13 @@ def pivot_and_categorize(
         write_raw_data=False,
         timeframe=None,
         filename=None,
-        output_dir='output/'
+        output_dir='output/',
+        out_tech=None
 ):
+    # out_tech sets the technology label used in OUTPUT filenames, while tech still
+    # drives the categorization logic. Lets a 'pv'-type run be written under a
+    # different name (e.g. 'pv_rooftop') without changing the quantile split.
+    out_tech = out_tech or tech
 
     if (tech == "wind_onshore") | (tech == "pv"):
         df_pvt = pd.pivot_table(df, values='capacity_factor', index='coords', columns='region', aggfunc=np.mean).copy()
@@ -138,21 +242,21 @@ def pivot_and_categorize(
         df_opt = df[df['coords'].isin(df_opt.index)]
 
         if write_raw_data == True:
-            df_inf.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + tech + '_inf_raw.csv', index=True)
-            df_avg.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + tech + '_avg_raw.csv', index=True)
-            df_opt.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + tech + '_opt_raw.csv', index=True)
+            df_inf.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_inf_raw.csv', index=True)
+            df_avg.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_avg_raw.csv', index=True)
+            df_opt.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_opt_raw.csv', index=True)
 
         df_inf = pd.pivot_table(df_inf, values='capacity_factor', index='time', columns='region', aggfunc=np.mean)
         df_avg = pd.pivot_table(df_avg, values='capacity_factor', index='time', columns='region', aggfunc=np.mean)
         df_opt = pd.pivot_table(df_opt, values='capacity_factor', index='time', columns='region', aggfunc=np.mean)
 
         if write_raw_data == True:
-            df.to_csv(output_dir + '/' + timeframe + '_' + tech + '_raw.csv', index=True)
+            df.to_csv(output_dir + '/' + timeframe + '_' + out_tech + '_raw.csv', index=True)
             display(df)
 
-        df_inf.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + tech + '_inf.csv', index=True)
-        df_avg.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + tech + '_avg.csv', index=True)
-        df_opt.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + tech + '_opt.csv', index=True)
+        df_inf.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_inf.csv', index=True)
+        df_avg.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_avg.csv', index=True)
+        df_opt.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_opt.csv', index=True)
 
         return df_inf, df_avg, df_opt
     
@@ -167,9 +271,20 @@ def pivot_and_categorize(
         return df_tracking 
 
     elif tech == "wind_offshore":
-        df_shallow = df[df['distance'] < 9]
-        df_deep = df[(df['distance'] > 27) & (df['distance'] < 120)]
-        df_transitional = df[(df['distance'] >= 9) & (df['distance'] <= 27)]
+        if 'depth' in df.columns:
+            # classify by water depth (m): fixed-bottom foundations up to ~60 m,
+            # floating beyond. shallow=monopile, transitional=jacket (both fixed/
+            # concrete), deep=floating. Cells deeper than FLOATING_MAX are dropped.
+            FIXED_SHALLOW_MAX = 30
+            FIXED_DEEP_MAX = 60
+            FLOATING_MAX = 1000
+            df_shallow = df[(df['depth'] > 0) & (df['depth'] <= FIXED_SHALLOW_MAX)]
+            df_transitional = df[(df['depth'] > FIXED_SHALLOW_MAX) & (df['depth'] <= FIXED_DEEP_MAX)]
+            df_deep = df[(df['depth'] > FIXED_DEEP_MAX) & (df['depth'] <= FLOATING_MAX)]
+        else:
+            df_shallow = df[df['distance'] < 9]
+            df_deep = df[(df['distance'] > 27) & (df['distance'] < 120)]
+            df_transitional = df[(df['distance'] >= 9) & (df['distance'] <= 27)]
 
         if write_raw_data == True:
             df_shallow.to_csv(output_dir + '/' + timeframe + '_' + filename + '_wind_offshore_shallow_raw.csv', index=True)
@@ -219,7 +334,9 @@ def pv_capacity_factors(
         timeframe=None,
         filename=None,
         write_raw_data=False,
-        output_dir='output/'
+        output_dir='output/',
+        tech_label='pv',
+        optimal_tilt=False
 ):
     start = timeit.timeit()
 
@@ -305,9 +422,24 @@ def pv_capacity_factors(
     
     sun_alt = cutout.data['solar_altitude']
     sun_azi = cutout.data['solar_azimuth']
-    
-    pv_slope = deg2rad(pv_slope)
-    pv_azimuth = deg2rad(pv_azimuth)
+
+    if optimal_tilt and tracking is None:
+        # Per-cell optimal fixed tilt/azimuth instead of one value for all sites.
+        # Closed-form rule of thumb (Landau), tilt as a function of |latitude| for
+        # max annual yield; azimuth faces the equator (180 deg N hemisphere, 0 deg
+        # S). This is a per-cell (y, x) array that broadcasts through the existing
+        # irradiance math at no extra cost - NOT a per-angle yield search (which
+        # would be far heavier). Rough by design; good enough for siting.
+        lat = cutout.data.y
+        abslat = abs(lat)
+        tilt_deg = xr.where(abslat <= 25, abslat * 0.87,
+                            abslat * 0.76 + 3.1)   # >50 deg extrapolates; rough
+        azi_deg = xr.where(lat >= 0, 180.0, 0.0)
+        pv_slope = deg2rad(tilt_deg)
+        pv_azimuth = deg2rad(azi_deg)
+    else:
+        pv_slope = deg2rad(pv_slope)
+        pv_azimuth = deg2rad(pv_azimuth)
 
     cosincidence, pv_slope = pv_angles(sun_alt, sun_azi, pv_slope, pv_azimuth, tracking)
 
@@ -401,7 +533,8 @@ def pv_capacity_factors(
     if tracking ==None:
 
         df_inf, df_avg, df_opt = pivot_and_categorize(pv_df, tech='pv', timeframe=timeframe, filename=filename,
-                                                      write_raw_data=write_raw_data,output_dir=output_dir)
+                                                      write_raw_data=write_raw_data,output_dir=output_dir,
+                                                      out_tech=tech_label)
 
         if delete_vars == 0:
             return df_inf, df_avg, df_opt
@@ -511,7 +644,10 @@ def wind_offshore_capacity_factors(
     wnd100 = pd.merge(wnd100, coords, on=['x', 'y'])
 
     wnd100['distance'] = round(wnd100['distance'].astype(float), 1)
-    wnd100 = wnd100[['time', 'coords', 'capacity_factor', 'distance', 'region']]
+    keep = ['time', 'coords', 'capacity_factor', 'distance', 'region']
+    if 'depth' in wnd100.columns:
+        keep.insert(4, 'depth')
+    wnd100 = wnd100[keep]
 
     df_shallow, df_transitional, df_deep = pivot_and_categorize(wnd100, tech='wind_offshore', timeframe=timeframe, filename=filename,write_raw_data=write_raw_data,output_dir=output_dir)
 
@@ -630,10 +766,10 @@ def plot_country_map(cutout, zoom=False, size=8, zoom_factor_x=5, zoom_factor_y=
     cells = cutout.grid
 
     # Load natural earth low resolution data
-    df = gpd.read_file(gpd.datasets.get_path('naturalearth_lowres'))
+    df = gpd.read_file(shpreader.natural_earth(resolution='110m', category='cultural', name='admin_0_countries'))
 
     # Create a GeoSeries from the union of the grid cells
-    country_bound = gpd.GeoSeries(cells.unary_union)
+    country_bound = gpd.GeoSeries(cells.union_all())
 
     # Determine the center of the map
     map_center_x, map_center_y = np.mean(country_bound.centroid.x), np.mean(country_bound.centroid.y)
@@ -704,38 +840,213 @@ def get_country_geometry(regions, natural_earth_dataset="admin_0_map_units"):
         raise Exception("Something went wrong: The country geometry could not be created. Please check your region codes and the regions mapping. Otherwise, you can also use full country names by using the argument 'use_full_names=True'")
     return country
 
-def get_cutout(filename, timeframe, module="era5", regions=None, cutout_north_west=None, cutout_south_east=None, dx=0.25, dy=0.25, folder="cutouts/", natural_earth_dataset="admin_0_map_units"):
+# ---------------------------------------------------------------------------
+# Persistent ERA5 download cache (atlite monkeypatch)
+# ---------------------------------------------------------------------------
+# atlite 0.6.1 downloads every ERA5 chunk into a throwaway temp dir and deletes it,
+# so any interrupted or failed prepare() re-downloads everything from the CDS. We
+# replace atlite's per-chunk download (atlite.datasets.era5.retrieve_data) with a
+# version that stores each downloaded chunk in a persistent cache keyed by its
+# exact CDS request, and reuses it on the next run. Intermediate files therefore
+# live in ERA5_CACHE_DIR (pointed at <folder>/era5_cache by get_cutout) and
+# survive crashes, so a re-run only redoes the local merge + write, not downloads.
+import cdsapi
+import hashlib
+import json
+from contextlib import nullcontext
+from atlite.datasets import era5 as _era5
+
+ERA5_CACHE_DIR = os.path.join("cutouts", "era5_cache")
+
+
+def _retrieve_data_cached(product, chunks=None, tmpdir=None, lock=None, **updates):
+    """Drop-in replacement for atlite.datasets.era5.retrieve_data with an on-disk
+    cache. Downloads a CDS chunk only if it is not already cached; otherwise reads
+    the cached file. Cached files persist in ERA5_CACHE_DIR across runs."""
+    request = {"product_type": ["reanalysis"], "download_format": "unarchived"}
+    request.update(updates)
+    assert {"year", "month", "variable"}.issubset(request), (
+        "Need to specify at least 'variable', 'year' and 'month'"
+    )
+
+    data_format = request.get("data_format", "grib")
+    suffix = f".{data_format}"
+    key = hashlib.md5(
+        json.dumps({"product": product, "request": request},
+                   sort_keys=True, default=str).encode()
+    ).hexdigest()
+    os.makedirs(ERA5_CACHE_DIR, exist_ok=True)
+    cache_file = os.path.join(ERA5_CACHE_DIR, key + suffix)
+
+    timestr = f"{request['year']}-{request['month']}"
+    varstr = ", ".join(np.atleast_1d(request["variable"]))
+
+    if os.path.exists(cache_file) and os.path.getsize(cache_file) > 0:
+        _era5.logger.info(f"CDS: reusing cached download for {varstr} ({timestr})")
+    else:
+        client = cdsapi.Client(info_callback=_era5.logger.debug,
+                               debug=logging.DEBUG >= logging.root.level)
+        result = client.retrieve(product, request)
+        with (lock if lock is not None else nullcontext()):
+            _era5.logger.info(f"CDS: downloading {varstr} ({timestr})")
+            part = cache_file + ".part"
+            result.download(part)
+            os.replace(part, cache_file)  # only a complete download becomes cache
+
+    # Open from the cache. Pass a non-None tmpdir so atlite does NOT attach a
+    # finalizer that would delete our persistent cache file when the dataset closes.
+    keepdir = tmpdir if tmpdir is not None else ERA5_CACHE_DIR
+    if data_format == "grib":
+        return _era5.open_with_grib_conventions(cache_file, chunks=chunks, tmpdir=keepdir)
+    return xr.open_dataset(cache_file, chunks=_era5.sanitize_chunks(chunks))
+
+
+# Apply the patch once, on import.
+if getattr(_era5.retrieve_data, "__name__", "") != "_retrieve_data_cached":
+    _era5.retrieve_data = _retrieve_data_cached
+
+
+# ERA5 variables this tool prepares (height, wind, influx, temperature features).
+# Used to estimate the total number of downloaded data points.
+_CUTOUT_VARS = ('height', 'wnd100m', 'roughness', 'influx_toa', 'influx_direct',
+                'influx_diffuse', 'albedo', 'solar_altitude', 'solar_azimuth',
+                'temperature', 'soil temperature')
+
+
+def _determine_cutout_bounds(regions=None, geo_file=None, cutout_north_west=None,
+                             cutout_south_east=None,
+                             natural_earth_dataset="admin_0_map_units"):
+    """Return the (minx, miny, maxx, maxy) lon/lat bounds the cutout will span.
+
+    Same precedence as get_cutout: explicit NW/SE corners win, else a region
+    geojson, else country ISO codes (region/country sources buffered by 1 degree).
+    """
+    if bool(cutout_north_west) and bool(cutout_south_east):
+        nw, se = cutout_north_west, cutout_south_east  # (lat, lon) each
+        return (nw[1], se[0], se[1], nw[0])
+
+    shapes = gpd.read_file(geo_file) if geo_file is not None else None
+    if shapes is not None and ("region" in shapes.columns) and ("iso_a2" not in shapes.columns):
+        return tuple(shapes.to_crs("EPSG:4326").union_all().buffer(1.0).bounds)
+    elif regions:
+        return tuple(get_country_geometry(regions=regions, natural_earth_dataset=natural_earth_dataset).buffer(1.0).union_all().bounds)
+    else:
+        raise Exception("get_cutout: provide cutout_north_west/south_east coordinates, a geo_file with region polygons, or a list of country ISO codes in 'regions'")
+
+
+def _report_cutout_size(bounds, timeframe, dx, dy, n_vars=len(_CUTOUT_VARS)):
+    """Print and return the expected cutout grid size for the given bounds.
+
+    Uses atlite's own get_coords so the cell/time counts match what prepare()
+    will build exactly (global np.arange grid sliced inclusively by bounds,
+    hourly time axis sliced by timeframe).
+    """
+    minx, miny, maxx, maxy = bounds
+    coords = atlite_get_coords(x=slice(minx, maxx), y=slice(miny, maxy),
+                               time=timeframe, dx=dx, dy=dy)
+    nx, ny, nt = coords.sizes["x"], coords.sizes["y"], coords.sizes["time"]
+    n_cells = nx * ny
+    cell_hours = n_cells * nt          # data points per variable
+    total = cell_hours * n_vars        # across all prepared variables
+    raw_bytes = total * 4              # float32, uncompressed (rough upper bound)
+    raw_gb = raw_bytes / 1e9
+    raw_str = f"{raw_gb:.2f} GB" if raw_gb >= 1 else f"{raw_bytes / 1e6:.1f} MB"
+
+    print("Expected cutout size:")
+    print(f"  bounds (lon/lat) : [{minx:.2f}, {maxx:.2f}] x [{miny:.2f}, {maxy:.2f}]")
+    print(f"  grid             : {nx} x {ny} = {n_cells:,} cells  (dx={dx}, dy={dy})")
+    print(f"  time steps       : {nt:,} hourly  ({timeframe})")
+    print(f"  points/variable  : {cell_hours:,}")
+    print(f"  total points     : {total:,}  (x{n_vars} variables)")
+    print(f"  uncompressed     : ~{raw_str} float32 (on-disk .nc is far smaller, compressed)")
+    return {"nx": nx, "ny": ny, "n_cells": n_cells, "n_time": nt,
+            "points_per_var": cell_hours, "total_points": total,
+            "raw_gb": raw_gb}
+
+
+def estimate_cutout_size(timeframe, regions=None, geo_file=None,
+                         cutout_north_west=None, cutout_south_east=None,
+                         dx=0.25, dy=0.25,
+                         natural_earth_dataset="admin_0_map_units"):
+    """Pre-compute how big a cutout will be BEFORE downloading anything.
+
+    Accepts the same region/coordinate/resolution arguments as get_cutout and
+    prints the grid dimensions, number of cells, hourly time steps and total
+    data points. Returns a dict with the same numbers.
+    """
+    bounds = _determine_cutout_bounds(regions=regions, geo_file=geo_file,
+                                      cutout_north_west=cutout_north_west,
+                                      cutout_south_east=cutout_south_east,
+                                      natural_earth_dataset=natural_earth_dataset)
+    return _report_cutout_size(bounds, timeframe, dx, dy)
+
+
+def _cutout_has_data(ds, var="temperature"):
+    """True if the cutout actually holds data, not just variable definitions.
+
+    A write that froze/was killed before its data chunks were flushed (e.g. an
+    antivirus lock during the HDF5 close) leaves a file with the right variables
+    and dimensions but all-NaN fill values. Checking the variable names is not
+    enough, so sample one timestep of a variable that is never legitimately NaN
+    (2 m temperature) and require at least one finite value.
+    """
+    if var not in ds.data_vars:
+        var = next(iter(ds.data_vars), None)
+        if var is None:
+            return False
+    sample = ds[var].isel(time=0).values
+    return bool(np.isfinite(sample).any())
+
+
+def get_cutout(filename, timeframe, module="era5", regions=None, geo_file=None, cutout_north_west=None, cutout_south_east=None, dx=0.25, dy=0.25, folder="cutouts/", natural_earth_dataset="admin_0_map_units"):
     dir = folder+filename+"_"+timeframe+"_"+str(int(dx*100))+"_"+str(int(dy*100))
     print(dir)
-    if regions == None:
-        cutout = atlite.Cutout(path=dir,
-                               module=module,
-                               x=slice(cutout_north_west[1], cutout_south_east[1]), # Longitude
-                               y=slice(cutout_north_west[0], cutout_south_east[0]), # Latitude
-                               dx=dx,
-                               dy=dy,
-                               time=timeframe)
 
-        cutout.prepare(['height', 'wind', 'influx', 'temperature'])
-        return cutout
+    # Store ERA5 chunk downloads in a persistent cache next to the cutouts, so an
+    # interrupted/failed run reuses them instead of re-downloading from the CDS
+    # (see the _retrieve_data_cached monkeypatch above).
+    global ERA5_CACHE_DIR
+    ERA5_CACHE_DIR = os.path.join(folder, "era5_cache")
+    os.makedirs(ERA5_CACHE_DIR, exist_ok=True)
 
-    elif (cutout_north_west==None) & (cutout_south_east==None):
-        country = get_country_geometry(regions=regions, natural_earth_dataset=natural_earth_dataset)
-        buffer = 1.0
-        country = country.buffer(buffer)
+    # Reuse an existing cutout if it already holds every variable this tool needs.
+    required_vars = {'height', 'wnd100m', 'roughness', 'influx_toa', 'influx_direct',
+                     'influx_diffuse', 'albedo', 'solar_altitude', 'solar_azimuth',
+                     'temperature', 'soil temperature'}
+    if os.path.exists(dir + '.nc'):
+        cutout = atlite.Cutout(path=dir)
+        if required_vars.issubset(set(cutout.data.data_vars)) and _cutout_has_data(cutout.data):
+            print("Cutout already prepared with required variables; skipping prepare().")
+            return cutout
+        # Incomplete or corrupt (missing vars, or all-NaN from a frozen write).
+        # Must delete it: atlite would otherwise see prepared_features set and skip
+        # the download, handing back the same NaN data. Close handle first (Windows).
+        print("Existing cutout is incomplete/corrupt (all-NaN or missing vars); deleting and rebuilding.")
+        cutout.data.close()
+        del cutout
+        gc.collect()
+        os.remove(dir + '.nc')
 
-        cutout = atlite.Cutout(path=dir,
-                               module=module,
-                               bounds=country.unary_union.bounds,
-                               dx=dx,
-                               dy=dy,
-                               time=timeframe)
+    # Bounds from explicit corners, a region geojson, or country ISO codes (same
+    # precedence for the explicit-coords and bounds paths; get_coords sorts so the
+    # resulting grid is identical either way).
+    bounds = _determine_cutout_bounds(regions=regions, geo_file=geo_file,
+                                      cutout_north_west=cutout_north_west,
+                                      cutout_south_east=cutout_south_east,
+                                      natural_earth_dataset=natural_earth_dataset)
 
-        cutout.prepare(['height', 'wind', 'influx', 'temperature'])
-        return cutout
+    # Report expected grid size before downloading anything.
+    _report_cutout_size(bounds, timeframe, dx, dy)
 
-    else:
-        raise Exception("It seems you specified both regions and cutout coordinates in the function arguments. Please only use one or the other")
+    cutout = atlite.Cutout(path=dir,
+                           module=module,
+                           bounds=bounds,
+                           dx=dx,
+                           dy=dy,
+                           time=timeframe)
+
+    cutout.prepare(['height', 'wind', 'influx', 'temperature'])
+    return cutout
 
 
 
@@ -781,7 +1092,7 @@ def gis_get_country_geometry(regions=None,admin=None,cutout=None):
         filtered_shapefile = shapefile_admin1_geodata[shapefile_admin1_geodata.iso_a2.isin(regions)].set_index("iso_3166_2")
         shapes = gpd.overlay(filtered_shapefile,gdf,how='intersection')
         
-    bounds = shapes.cascaded_union.buffer(1).bounds
+    bounds = shapes.union_all().buffer(1).bounds
     plt.rc("figure", figsize=[10, 7])
     fig, ax = plt.subplots()
     shapes.plot(ax=ax)
@@ -789,64 +1100,107 @@ def gis_get_country_geometry(regions=None,admin=None,cutout=None):
 
     return shapes,regions_name_en
 
-def calculate_and_plot_available_area(admin=None,cutout=None,shapes=None,regions_name_en=None,excluder=None):
+from contextlib import contextmanager
+
+
+@contextmanager
+def _quiet_rasterio(verbose=False):
+    """Silence rasterio/GDAL WARNING spam during raster masking unless verbose.
+
+    atlite's availability calc emits one 'Value -128 ... changed to -128' GDAL
+    warning per region/tile (harmless nodata note), which clogs the log. Raise the
+    rasterio logger to ERROR while inside this block; restore it afterwards. Pass
+    verbose=True to keep the warnings.
+    """
+    logger = logging.getLogger("rasterio")
+    prev = logger.level
+    if not verbose:
+        logger.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        logger.setLevel(prev)
+
+
+def calculate_and_plot_available_area(admin=None,cutout=None,shapes=None,regions_name_en=None,excluder=None,verbose=False):
     gp = shapes.loc[shapes.index].geometry.to_crs(excluder.crs)
     excluder.open_files()
-    masked, transform = excluder.compute_shape_availability(gp)
+    with _quiet_rasterio(verbose):
+        masked, transform = excluder.compute_shape_availability(gp)
 
-    fig, ax = plt.subplots()
-    excluder.plot_shape_availability(gp)
+        fig, ax = plt.subplots()
+        excluder.plot_shape_availability(gp)
 
-    AvailablityMatrix = cutout.availabilitymatrix(shapes, excluder)
+        AvailablityMatrix = cutout.availabilitymatrix(shapes, excluder)
 
+    # atlite names the shape dimension after the shapes index name (e.g. 'region'),
+    # falling back to 'dim_0' when unnamed. Read it from the result so plotting works
+    # for any region set / workflow rather than assuming 'dim_0'.
+    shape_dim = AvailablityMatrix.dims[0]
 
     if admin == 1:
-
-        fg = AvailablityMatrix.plot(row="dim_0", col_wrap=3, cmap="Greens")
+        fg = AvailablityMatrix.plot(row=shape_dim, col_wrap=3, cmap="Greens")
         fg.set_titles("{value}")
         for i, c in enumerate(shapes.index):
             shapes.plot(ax=fg.axs.flatten()[i], edgecolor="k", color="None")
-
-    elif admin == 0:
-        for c in regions_name_en:
+    else:
+        for c in AvailablityMatrix[shape_dim].values:
             fig, ax = plt.subplots()
-            AvailablityMatrix.sel(dim_0=c).plot(cmap="Greens")
+            AvailablityMatrix.sel({shape_dim: c}).plot(cmap="Greens")
             shapes.loc[[c]].plot(ax=ax, edgecolor="k", color="None")
             cutout.grid.plot(ax=ax, color="None", edgecolor="grey", ls=":")
 
-    return AvailablityMatrix 
+    return AvailablityMatrix
 
-def calculate_and_plot_available_rooftops(admin=None,cutout=None,shapes=None,regions_name_en=None,cities=None):
+def calculate_and_plot_available_rooftops(admin=None,cutout=None,shapes=None,regions_name_en=None,cities=None,verbose=False):
     rooftops = shapes.loc[shapes.index].geometry.to_crs(cities.crs)
     cities.open_files()
-    masked, transform = cities.compute_shape_availability(rooftops)
+    with _quiet_rasterio(verbose):
+        masked, transform = cities.compute_shape_availability(rooftops)
 
-    fig, ax = plt.subplots()
-    cities.plot_shape_availability(rooftops)
+        fig, ax = plt.subplots()
+        cities.plot_shape_availability(rooftops)
 
-    AvailabilityMatrix_Rooftop = cutout.availabilitymatrix(shapes, cities)
+        AvailabilityMatrix_Rooftop = cutout.availabilitymatrix(shapes, cities)
+
+    shape_dim = AvailabilityMatrix_Rooftop.dims[0]
 
     if admin == 1:
-
-        fg = AvailabilityMatrix_Rooftop.plot(row="dim_0", col_wrap=3, cmap="Greens")
+        fg = AvailabilityMatrix_Rooftop.plot(row=shape_dim, col_wrap=3, cmap="Greens")
         fg.set_titles("{value}")
         for i, c in enumerate(shapes.index):
             shapes.plot(ax=fg.axs.flatten()[i], edgecolor="k", color="None")
-
-    elif admin == 0:
-        for c in regions_name_en:
+    else:
+        for c in AvailabilityMatrix_Rooftop[shape_dim].values:
             fig, ax = plt.subplots()
-            AvailabilityMatrix_Rooftop.sel(dim_0=c).plot(cmap="Greens")
+            AvailabilityMatrix_Rooftop.sel({shape_dim: c}).plot(cmap="Greens")
             shapes.loc[[c]].plot(ax=ax, edgecolor="k", color="None")
             cutout.grid.plot(ax=ax, color="None", edgecolor="grey", ls=":")
 
     return AvailabilityMatrix_Rooftop
 
-def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMatrix=None,AvailabilityMatrix_Rooftop=None,pv_cap_per_sqkm=100,pv_percent_land_available=0.03,wind_cap_per_sqkm=27,wind_percent_land_available=0.03,rooftop_cap_per_sqkm=100,rooftop_percent_area_available=0.2):
-    area = cutout.grid.set_index(["y", "x"]).to_crs(3035).area / 1e6
+def equal_area_crs(shapes):
+    """Region-agnostic equal-area CRS: a Lambert Azimuthal Equal-Area projection
+    centred on the data, so areas are correct for any region on Earth without
+    hardcoding a national CRS. Accepts a GeoDataFrame/GeoSeries.
+    """
+    geom = shapes.to_crs("EPSG:4326").union_all()
+    c = geom.centroid
+    return (f"+proj=laea +lat_0={c.y:.6f} +lon_0={c.x:.6f} "
+            "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
+
+
+def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMatrix=None,AvailabilityMatrix_Rooftop=None,pv_cap_per_sqkm=100,pv_percent_land_available=0.03,wind_cap_per_sqkm=27,wind_percent_land_available=0.03,rooftop_cap_per_sqkm=100,rooftop_percent_area_available=0.2,area_crs=None):
+    area = cutout.grid.set_index(["y", "x"]).to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6
     area.name = "Area [km²]"
-    availability_df = AvailabilityMatrix.to_dataframe(name="availability").reset_index()
-    availability_rooftop_df = AvailabilityMatrix_Rooftop.to_dataframe(name="availability rooftop").reset_index()
+    # The availability matrix is indexed by (shape, y, x); collapse to one value per
+    # (y, x) cell. Keep only y/x/value so the matrix's own shape-dimension column
+    # (named after the shapes index, e.g. 'region') does not collide with the
+    # 'region' column from coords_onshore on the merge below.
+    availability_df = (AvailabilityMatrix.to_dataframe(name="availability")
+                       .groupby(["y", "x"])["availability"].sum().reset_index())
+    availability_rooftop_df = (AvailabilityMatrix_Rooftop.to_dataframe(name="availability rooftop")
+                               .groupby(["y", "x"])["availability rooftop"].sum().reset_index())
     merged_df = availability_df.merge(coords_onshore, on=['y', 'x'], how='inner')
     merged_df = merged_df.merge(availability_rooftop_df, on=['y', 'x'], how='inner')
     merged_df = merged_df.merge(area, on=['y', 'x'], how='inner')
@@ -861,6 +1215,435 @@ def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMa
     output_df = merged_df.groupby("region")[["Area [km²]","Suitable Area PV [km²]","Suitable Area Wind [km²]","Suitable Area Rooftops [km²]","PV Capacity [GW]","Rooftop Capacity [GW]","Wind Capacity [GW]"]].sum().reset_index()
 
     return output_df
+
+
+# ---------------------------------------------------------------------------
+# Region-agnostic GIS potential helpers
+# ---------------------------------------------------------------------------
+# These contain no country-specific logic: the regional specifics (region
+# polygons, land-cover raster + its class codes, protected-area files, capacity
+# densities) are all passed in as arguments, so the same code works for any region.
+
+def get_region_shapes(geo_file, regions=None, region_col="region"):
+    """Load onshore region polygons from a geojson.
+
+    Returns (GeoDataFrame indexed by region name, list of region names). 'regions'
+    optionally subsets to a list of names; empty/None keeps all. Multi-row regions
+    are dissolved to one geometry each. Use this (region workflow) instead of
+    gis_get_country_geometry (country/NUTS workflow) so the GIS potentials use the
+    same region polygons as the timeseries.
+    """
+    gdf = gpd.read_file(geo_file)
+    if region_col not in gdf.columns:
+        raise ValueError(f"geo_file '{geo_file}' has no '{region_col}' column; "
+                         "the GIS potentials need a region-polygon geojson.")
+    gdf = gdf.dissolve(by=region_col)
+    if regions:
+        gdf = gdf.loc[gdf.index.intersection(regions)]
+    return gdf, list(gdf.index)
+
+
+def _raster_crs(raster_file):
+    """Native CRS of a raster as a string, or None if the raster declares none."""
+    import rasterio
+    with rasterio.open(raster_file) as src:
+        return src.crs.to_string() if src.crs else None
+
+
+def _safe_nodata(raster_file):
+    """A nodata fill value that fits the raster's dtype.
+
+    atlite's add_raster defaults nodata=255, which overflows signed/8-bit rasters
+    (e.g. an int8 land-cover map: valid range -128..127) and makes rasterio.mask
+    raise 'Cannot convert fill_value 255 to dtype int8'. Use the raster's own
+    declared nodata if it has one, else the dtype minimum as a safe sentinel.
+    """
+    import rasterio
+    import numpy as np
+    with rasterio.open(raster_file) as src:
+        if src.nodata is not None:
+            return src.nodata
+        dt = np.dtype(src.dtypes[0])
+        if np.issubdtype(dt, np.integer):
+            return int(np.iinfo(dt).min)
+        return float(np.finfo(dt).min)
+
+
+def make_land_excluder(land_cover_raster, exclude_codes, crs=None, raster_crs=None,
+                       raster_nodata=None,
+                       protected_files=None, protected_query=None,
+                       protected_layer=None, protected_buffer=0):
+    """Build an excluder for utility-scale PV / onshore wind land availability.
+
+    land_cover_raster : categorical land-cover raster (e.g. NLCD, CORINE).
+    exclude_codes     : raster values to mark UNavailable (your strict land list).
+    crs               : analysis CRS; defaults to the raster's native CRS (fast,
+                        no raster reprojection; national land-cover rasters are
+                        usually already equal-area).
+    protected_files   : path or list of paths to protected-area vector files.
+    protected_query   : pandas query to pre-filter protected areas before excluding
+                        (e.g. "GAP_Sts in ['1','2']" for strict protection).
+    protected_buffer  : buffer in CRS units (metres) around protected areas.
+    """
+    excluder = ExclusionContainer(crs=crs or raster_crs or _raster_crs(land_cover_raster))
+    # raster_crs is passed through for rasters that declare no CRS of their own;
+    # nodata is forced to a dtype-safe value (atlite's default 255 overflows int8).
+    nodata = raster_nodata if raster_nodata is not None else _safe_nodata(land_cover_raster)
+    excluder.add_raster(land_cover_raster, codes=list(exclude_codes), crs=raster_crs, nodata=nodata)
+    files = protected_files if protected_files is not None else []
+    if isinstance(files, (str, os.PathLike, gpd.GeoDataFrame)):
+        files = [files]
+    for pf in files:
+        if isinstance(pf, gpd.GeoDataFrame):
+            gdf = pf
+        elif protected_layer:
+            gdf = gpd.read_file(pf, layer=protected_layer)  # e.g. a layer in a GeoPackage
+        else:
+            gdf = gpd.read_file(pf)
+        if protected_query:
+            gdf = gdf.query(protected_query)
+        excluder.add_geometry(gdf, buffer=protected_buffer)
+    return excluder
+
+
+def make_rooftop_excluder(land_cover_raster, developed_codes, crs=None, raster_crs=None,
+                          raster_nodata=None):
+    """Build a rooftop-area proxy excluder: keep ONLY the developed/built-up
+    land-cover classes (everything else excluded). developed_codes are your
+    land-cover dataset's urban/developed class values.
+    """
+    excluder = ExclusionContainer(crs=crs or raster_crs or _raster_crs(land_cover_raster))
+    nodata = raster_nodata if raster_nodata is not None else _safe_nodata(land_cover_raster)
+    excluder.add_raster(land_cover_raster, codes=list(developed_codes), invert=True, crs=raster_crs, nodata=nodata)
+    return excluder
+
+
+def calculate_offshore_potentials(cutout, coords_offshore,
+                                  offshore_cap_per_sqkm=5,
+                                  offshore_percent_available=0.1,
+                                  shallow_max=30, transitional_max=60, floating_max=1000,
+                                  area_crs=None):
+    """Offshore wind potential per region (and depth class), region-agnostic.
+
+    Reuses the EEZ-clipped, depth-classified offshore cells from get_coords
+    (coords_offshore), so by construction only actual offshore zones are counted.
+    Cell areas are computed in an equal-area projection.
+
+    offshore_cap_per_sqkm / offshore_percent_available may be a scalar (applied to
+    all cells) or a dict keyed by depth_class (e.g. a lower density / availability
+    for floating deep water). Depth-class labels are read from the data, so nothing
+    is hardcoded.
+    """
+    area = cutout.grid.set_index(["y", "x"]).to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6
+    area.name = "Area [km²]"
+    df = coords_offshore.merge(area.reset_index(), on=["y", "x"], how="inner")
+
+    # classify each offshore cell by water depth, same scheme as the offshore
+    # timeseries (shallow/transitional fixed-bottom, deep floating; drop deeper).
+    if "depth" in df.columns:
+        df = df[(df["depth"] > 0) & (df["depth"] <= floating_max)].copy()
+        df["depth_class"] = pd.cut(df["depth"],
+                                   bins=[0, shallow_max, transitional_max, floating_max],
+                                   labels=["shallow", "transitional", "deep"])
+    else:
+        df["depth_class"] = "all"
+
+    def _lookup(value, c):
+        return value.get(c, 0) if isinstance(value, dict) else value
+
+    classes = df["depth_class"].astype(str)
+    df["_cap"] = [ _lookup(offshore_cap_per_sqkm, c) for c in classes ]
+    df["_pct"] = [ _lookup(offshore_percent_available, c) for c in classes ]
+
+    df["Suitable Area Offshore [km²]"] = df["Area [km²]"] * df["_pct"]
+    df["Offshore Wind Capacity [GW]"] = df["Area [km²]"] * df["_cap"] * df["_pct"] / 1000
+
+    return df.groupby(["region", "depth_class"], observed=True)[
+        ["Area [km²]", "Suitable Area Offshore [km²]", "Offshore Wind Capacity [GW]"]
+    ].sum().reset_index()
+
+
+def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
+                                    excluder, cities,
+                                    regions=None, region_col="region",
+                                    pv_cap_per_sqkm=100, pv_percent_land_available=0.03,
+                                    wind_cap_per_sqkm=27, wind_percent_land_available=0.03,
+                                    rooftop_cap_per_sqkm=100, rooftop_percent_area_available=0.2,
+                                    coords_offshore=None, usable_threshold=0.01,
+                                    usable_threshold_rooftop=None, usable_round_to=2,
+                                    offshore_exclude_files=None, offshore_exclude_layer=None,
+                                    offshore_exclude_query=None, offshore_exclude_buffer=0,
+                                    area_crs=None, output_dir="output/", filename="",
+                                    plot=True, plot_cols=3, plot_size=3, verbose=False):
+    """Memory-safe per-region GIS potentials with a stitched availability map.
+
+    Processes one region at a time so atlite only ever rasterizes the land-cover
+    raster over a single region's bounding box, not the whole multi-region extent
+    (the part that blows up RAM at 30 m for a continent). Region-agnostic: regions,
+    polygons and exclusion layers are all supplied by the caller.
+
+    For each region it computes the land (PV/wind) and rooftop availability
+    matrices, derives the capacity potentials, writes a per-region availability
+    CSV, and accumulates the result into a single combined (y, x) map. Because the
+    region polygons are disjoint, the per-region matrices are summed cell-by-cell
+    into one stitched map covering all processed regions.
+
+    Returns (combined_potentials_df, stitched_availability, stitched_rooftop,
+             coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable):
+    - combined_potentials_df : capacity potentials for every region (one table).
+    - stitched_availability  : xr.DataArray (y, x) land availability across regions.
+    - stitched_rooftop       : xr.DataArray (y, x) rooftop availability across regions.
+    - coords_onshore_usable  : onshore land coords (all regions) with availability
+                               >= usable_threshold, for the PV / onshore-wind CF
+                               timeseries.
+    - coords_rooftop_usable  : coords with rooftop (developed) area, for a separate
+                               rooftop-PV CF timeseries.
+    - coords_offshore_usable : buildable offshore coords (depth-classed) if
+                               coords_offshore was passed, else None.
+    """
+    shapes_all, names = get_region_shapes(geo_file, regions, region_col=region_col)
+    os.makedirs(output_dir, exist_ok=True)
+
+    stitch_land = None      # running (y, x) sum across regions
+    stitch_roof = None
+    per_region_tables = []
+    usable_onshore_parts = []   # usable land coords accumulated across regions
+    usable_rooftop_parts = []   # usable rooftop coords accumulated across regions
+
+    for name in names:
+        print(f"Processing region: {name}")
+        shapes = shapes_all.loc[[name]]
+
+        # one-region availability; atlite crops the raster to this region's bounds
+        with _quiet_rasterio(verbose):
+            land = cutout.availabilitymatrix(shapes, excluder, disable_progressbar=True)
+            roof = cutout.availabilitymatrix(shapes, cities, disable_progressbar=True)
+
+        # drop the singleton shape dimension -> (y, x) map for this region
+        shape_dim = land.dims[0]
+        land_yx = land.sum(shape_dim)
+        roof_yx = roof.sum(shape_dim)
+        stitch_land = land_yx if stitch_land is None else stitch_land + land_yx
+        stitch_roof = roof_yx if stitch_roof is None else stitch_roof + roof_yx
+
+        # capacity potentials for just this region (reuses the existing function)
+        coords_region = coords_onshore[coords_onshore["region"] == name]
+        if not coords_region.empty:
+            region_df = calculate_capacity_potentials(
+                cutout=cutout, coords_onshore=coords_region,
+                AvailabilityMatrix=land, AvailabilityMatrix_Rooftop=roof,
+                pv_cap_per_sqkm=pv_cap_per_sqkm, pv_percent_land_available=pv_percent_land_available,
+                wind_cap_per_sqkm=wind_cap_per_sqkm, wind_percent_land_available=wind_percent_land_available,
+                rooftop_cap_per_sqkm=rooftop_cap_per_sqkm, rooftop_percent_area_available=rooftop_percent_area_available,
+                area_crs=area_crs)
+            region_df.to_csv(os.path.join(output_dir, f"{filename}_potentials_{name}.csv"), index=False)
+            per_region_tables.append(region_df)
+
+            # usable sites for this region (cells with developable area), for the
+            # capacity-factor timeseries on usable locations only. Land drives PV /
+            # onshore wind; rooftop matrix drives the rooftop-PV timeseries.
+            roof_thresh = (usable_threshold_rooftop if usable_threshold_rooftop
+                           is not None else usable_threshold)
+            usable_onshore_parts.append(
+                usable_onshore_coords(land, coords_region, threshold=usable_threshold,
+                                      round_to=usable_round_to))
+            usable_rooftop_parts.append(
+                usable_onshore_coords(roof, coords_region, threshold=roof_thresh,
+                                      round_to=usable_round_to))
+
+        # free the per-region full matrices before the next region
+        del land, roof, land_yx, roof_yx
+        gc.collect()
+
+    combined = (pd.concat(per_region_tables, ignore_index=True)
+                if per_region_tables else pd.DataFrame())
+    combined.to_csv(os.path.join(output_dir, f"{filename}_potentials_combined.csv"), index=False)
+
+    if plot and stitch_land is not None:
+        # cell areas (km²) on the stitched (y, x) grid, in an equal-area projection,
+        # so the headline availability is area-weighted (large cells count more).
+        area_ser = (cutout.grid.set_index(["y", "x"])
+                    .to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6)
+        area_da = (area_ser.rename("area").to_xarray()
+                   .reindex(y=stitch_land.y, x=stitch_land.x))
+
+        # one stitched chart each: the combined availability map of all regions, with
+        # region outlines overlaid. Title shows the area-weighted mean availability
+        # over covered cells (sum(availability*area) / sum(area)).
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        # size the figure to the data's aspect so a wide, short map does not sit in a
+        # square frame (which is what made the default colorbar look oversized).
+        xext = float(stitch_land.x.max() - stitch_land.x.min())
+        yext = float(stitch_land.y.max() - stitch_land.y.min())
+        width = plot_size * plot_cols
+        height = max(2.0, width * (yext / xext if xext else 1.0))
+        for label, stitched in [("Land (PV/wind)", stitch_land), ("Rooftop area", stitch_roof)]:
+            covered = stitched > 0
+            w = area_da.where(covered)
+            denom = float(w.sum())
+            avg = float((stitched.where(covered) * w).sum() / denom) if denom > 0 else 0.0
+            fig, ax = plt.subplots(figsize=(width, height))
+            im = stitched.plot(ax=ax, cmap="Greens", add_colorbar=False)
+            shapes_all.boundary.plot(ax=ax, edgecolor="k", linewidth=0.5)
+            # colorbar tied to the map axes -> same height as the chart, thin width
+            cax = make_axes_locatable(ax).append_axes("right", size="3%", pad=0.1)
+            fig.colorbar(im, cax=cax)
+            ax.set_title(f"{label} availability: {avg * 100:.1f}%")
+
+    coords_onshore_usable = (pd.concat(usable_onshore_parts, ignore_index=True)
+                             if usable_onshore_parts else coords_onshore.iloc[0:0].copy())
+    coords_onshore_usable.to_csv(
+        os.path.join(output_dir, f"{filename}_coords_onshore_usable.csv"), index=False)
+
+    coords_rooftop_usable = (pd.concat(usable_rooftop_parts, ignore_index=True)
+                             if usable_rooftop_parts else coords_onshore.iloc[0:0].copy())
+    coords_rooftop_usable.to_csv(
+        os.path.join(output_dir, f"{filename}_coords_rooftop_usable.csv"), index=False)
+
+    coords_offshore_usable = None
+    if coords_offshore is not None:
+        coords_offshore_usable = usable_offshore_coords(
+            coords_offshore, exclude_files=offshore_exclude_files,
+            exclude_layer=offshore_exclude_layer, exclude_query=offshore_exclude_query,
+            exclude_buffer=offshore_exclude_buffer)
+        coords_offshore_usable.to_csv(
+            os.path.join(output_dir, f"{filename}_coords_offshore_usable.csv"), index=False)
+
+    return (combined, stitch_land, stitch_roof,
+            coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable)
+
+
+def usable_onshore_coords(availability_matrix, coords_onshore, threshold=0.01,
+                          round_to=2):
+    """Filter onshore coordinates to the cells that are actually usable.
+
+    An availability matrix gives, per cutout cell, the share (0..1) of that cell
+    that survives the exclusion layers. At coarse cutout resolution almost every
+    cell has a tiny non-zero share, so a bare `> 0` test keeps nearly all cells.
+    To avoid that, cells are kept only where the RAW share >= `threshold` (default
+    0.01 = at least 1 % of the cell developable). `round_to` only rounds the value
+    stored in the returned 'availability' column for readability; it does NOT
+    affect which cells are kept (an earlier version rounded before thresholding,
+    which bumped 0.005 up to 0.01 and effectively halved the threshold). Set
+    threshold=0 to keep any non-zero cell.
+
+    Rooftop note: the rooftop matrix is the built-up fraction of a cell, which is
+    small even in populated cells, so it needs a higher threshold than land to
+    drop near-empty cells - pass a larger `threshold` for rooftop.
+
+    Feed the result into pv_capacity_factors / wind_onshore_capacity_factors to get
+    a capacity-factor timeseries built ONLY from developable sites. Those functions
+    still split the kept sites into opt/avg/inf by their own quantiles. Region-
+    agnostic: the matrix's shape dimension is read from the data. Works on any
+    availability matrix, e.g. pass a rooftop matrix to get rooftop-usable cells.
+    """
+    # collapse (shape, y, x) -> one availability value per (y, x) cell
+    avail = (availability_matrix.to_dataframe(name="availability")
+             .groupby(["y", "x"])["availability"].sum().reset_index())
+    merged = coords_onshore.merge(avail, on=["y", "x"], how="inner")
+    keep = merged[merged["availability"] >= threshold].copy()   # filter on RAW value
+    if round_to is not None:
+        keep["availability"] = keep["availability"].round(round_to)   # display only
+    return keep.reset_index(drop=True)
+
+
+def _drop_points_in_geometries(df, exclude_files, exclude_layer=None,
+                               exclude_query=None, exclude_buffer=0):
+    """Drop rows whose (x, y) point falls inside any exclusion polygon.
+
+    Region-agnostic helper. exclude_files is a path or list of paths to vector
+    files (shapefile/GeoJSON/GeoPackage/File-GDB layer). exclude_layer selects a
+    layer in a multi-layer source; exclude_query pre-filters features; positive
+    exclude_buffer (metres) grows the excluded polygons. Returns the kept rows.
+    """
+    files = exclude_files
+    if isinstance(files, (str, os.PathLike, gpd.GeoDataFrame)):
+        files = [files]
+
+    pts = gpd.GeoDataFrame(df.copy(),
+                           geometry=gpd.points_from_xy(df["x"], df["y"]),
+                           crs="EPSG:4326")
+    keep = pts
+    for ef in files:
+        gdf = ef if isinstance(ef, gpd.GeoDataFrame) else (
+            gpd.read_file(ef, layer=exclude_layer) if exclude_layer
+            else gpd.read_file(ef))
+        if exclude_query:
+            gdf = gdf.query(exclude_query)
+        gdf = gdf.to_crs("EPSG:4326")
+        if exclude_buffer:
+            # buffer in metres via an equal-area projection centred on the data
+            aea = equal_area_crs(keep)
+            gdf = gdf.to_crs(aea).buffer(exclude_buffer).to_crs("EPSG:4326")
+            gdf = gpd.GeoDataFrame(geometry=gdf, crs="EPSG:4326")
+        inside = gpd.sjoin(keep, gdf[["geometry"]], how="left", predicate="within")
+        keep = keep.loc[inside["index_right"].isna().groupby(level=0).all()]
+    return keep.drop(columns="geometry").reset_index(drop=True)
+
+
+def usable_offshore_coords(coords_offshore, shallow_max=30, transitional_max=60,
+                           floating_max=1000, exclude_files=None,
+                           exclude_layer=None, exclude_query=None, exclude_buffer=0):
+    """Filter offshore coordinates to buildable sites.
+
+    Two filters: (1) water depth within limits - keeps EEZ cells with
+    0 < depth <= floating_max and tags depth_class (shallow / transitional / deep)
+    matching the offshore timeseries; (2) optional exclusion of marine protected
+    areas / other no-build zones via exclude_files (any vector source; for the US,
+    the PAD-US 'PADUS4_1Marine' layer covers marine protected areas). Feed the
+    result into wind_offshore_capacity_factors. Region-agnostic - all exclusion
+    inputs are passed in.
+    """
+    if "depth" not in coords_offshore.columns:
+        df = coords_offshore.copy()
+    else:
+        df = coords_offshore[(coords_offshore["depth"] > 0) &
+                             (coords_offshore["depth"] <= floating_max)].copy()
+        df["depth_class"] = pd.cut(df["depth"],
+                                   bins=[0, shallow_max, transitional_max, floating_max],
+                                   labels=["shallow", "transitional", "deep"])
+    df = df.reset_index(drop=True)
+
+    if exclude_files is not None and not df.empty:
+        before = len(df)
+        df = _drop_points_in_geometries(df, exclude_files, exclude_layer,
+                                        exclude_query, exclude_buffer)
+        print(f"offshore exclusion: dropped {before - len(df)} of {before} cells")
+    return df.reset_index(drop=True)
+
+
+def plot_offshore_map(coords_offshore, shapes=None, offshore_file=None,
+                      color_by="depth_class", size=8, point_size=6):
+    """Map the usable offshore cells, coloured by depth class (or region).
+
+    coords_offshore : offshore cells from get_coords / usable_offshore_coords
+                      (needs x, y and the color_by column).
+    shapes          : optional onshore region polygons to draw for context.
+    offshore_file   : optional EEZ geojson to outline the offshore zone.
+    color_by        : 'depth_class' (default) or 'region'.
+    """
+    df = coords_offshore.copy()
+    if color_by == "depth_class" and "depth_class" not in df.columns and "depth" in df.columns:
+        df = usable_offshore_coords(df)
+
+    pts = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df["x"], df["y"]),
+                           crs="EPSG:4326")
+
+    fig, ax = plt.subplots(figsize=(size, size))
+    if offshore_file is not None:
+        gpd.read_file(offshore_file).to_crs("EPSG:4326").boundary.plot(
+            ax=ax, edgecolor="steelblue", linewidth=0.6)
+    if shapes is not None:
+        shapes.to_crs("EPSG:4326").boundary.plot(ax=ax, edgecolor="grey", linewidth=0.5)
+
+    if color_by in pts.columns:
+        for key, grp in pts.groupby(color_by, observed=True):
+            grp.plot(ax=ax, markersize=point_size, label=str(key))
+        ax.legend(title=color_by, fontsize=8)
+    else:
+        pts.plot(ax=ax, markersize=point_size)
+    ax.set_title(f"Usable offshore cells by {color_by}")
+    return ax
 
 
 
