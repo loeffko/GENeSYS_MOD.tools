@@ -3,3 +3,6 @@ iamc_conversion/genesysmod_to_iamc/__pycache__/
 iamc_conversion/.ipynb_checkpoints/
 iamc_conversion/genesysmod_to_iamc/out/
 iamc_conversion/genesysmod_to_iamc/input/
+GIS_&_Timeseries_Tool/geodata/
+GIS_&_Timeseries_Tool/output
+GIS_&_Timeseries_Tool/__pycache__
