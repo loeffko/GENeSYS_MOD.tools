@@ -214,6 +214,25 @@ def get_coords(
 ########################################################
 ## help function to pivot, categorize and write files ##
 ########################################################
+def _site_categories(df_long):
+    """Per-coordinate inf/avg/opt label, same rule as pivot_and_categorize.
+
+    df_long has columns coords, capacity_factor, region. Each coordinate is
+    classified within its region by the annual-mean capacity factor: <= regional
+    30th percentile -> 'inf', >= 70th -> 'opt', else 'avg'. Returns a DataFrame
+    [coords, region, category]. Used to colour usable-site maps by site quality.
+    """
+    m = (df_long.groupby(["region", "coords"], as_index=False)["capacity_factor"]
+         .mean())
+    # per-region 30th/70th percentile thresholds, broadcast back to each row
+    g = m.groupby("region")["capacity_factor"]
+    q30 = g.transform(lambda s: s.quantile(0.30))
+    q70 = g.transform(lambda s: s.quantile(0.70))
+    m["category"] = np.where(m["capacity_factor"] <= q30, "inf",
+                             np.where(m["capacity_factor"] >= q70, "opt", "avg"))
+    return m[["coords", "region", "category"]]
+
+
 def pivot_and_categorize(
         df,
         tech,
@@ -336,7 +355,8 @@ def pv_capacity_factors(
         write_raw_data=False,
         output_dir='output/',
         tech_label='pv',
-        optimal_tilt=False
+        optimal_tilt=False,
+        return_categories=False
 ):
     start = timeit.timeit()
 
@@ -536,6 +556,9 @@ def pv_capacity_factors(
                                                       write_raw_data=write_raw_data,output_dir=output_dir,
                                                       out_tech=tech_label)
 
+        if return_categories:
+            # per-site inf/avg/opt label, for colouring usable-site maps
+            return df_inf, df_avg, df_opt, _site_categories(pv_df)
         if delete_vars == 0:
             return df_inf, df_avg, df_opt
         else:
@@ -563,7 +586,8 @@ def wind_onshore_capacity_factors(
         timeframe=None,
         filename=None,
         write_raw_data=False,
-        output_dir='output/'
+        output_dir='output/',
+        return_categories=False
 ):
 
     start = timeit.timeit()
@@ -597,6 +621,8 @@ def wind_onshore_capacity_factors(
 
     df_inf, df_avg, df_opt = pivot_and_categorize(wnd100, tech='wind_onshore', timeframe=timeframe, filename=filename, write_raw_data=write_raw_data,output_dir=output_dir)
 
+    if return_categories:
+        return df_inf, df_avg, df_opt, _site_categories(wnd100)
     if delete_vars == 0:
         return df_inf, df_avg, df_opt
     else:
@@ -1374,7 +1400,10 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     offshore_exclude_files=None, offshore_exclude_layer=None,
                                     offshore_exclude_query=None, offshore_exclude_buffer=0,
                                     area_crs=None, output_dir="output/", filename="",
-                                    plot=True, plot_cols=3, plot_size=3, verbose=False):
+                                    plot=True, plot_cols=3, plot_size=3, verbose=False,
+                                    add_category=True, pv_solar_panel=None,
+                                    pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
+                                    rooftop_pv_slope=25, rooftop_pv_azimuth=180):
     """Memory-safe per-region GIS potentials with a stitched availability map.
 
     Processes one region at a time so atlite only ever rasterizes the land-cover
@@ -1492,20 +1521,46 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
 
     coords_onshore_usable = (pd.concat(usable_onshore_parts, ignore_index=True)
                              if usable_onshore_parts else coords_onshore.iloc[0:0].copy())
-    coords_onshore_usable.to_csv(
-        os.path.join(output_dir, f"{filename}_coords_onshore_usable.csv"), index=False)
-
     coords_rooftop_usable = (pd.concat(usable_rooftop_parts, ignore_index=True)
                              if usable_rooftop_parts else coords_onshore.iloc[0:0].copy())
+
+    # Attach a site-quality 'category' (inf/avg/opt) per cell so the usable-coords
+    # CSVs carry it for later plotting/analysis. Categories use the PV capacity
+    # factor (utility tilt for land, rooftop tilt for rooftop), same q30/q70 split
+    # as the timeseries. CF outputs go to a temp dir so no extra files are written.
+    if add_category and pv_solar_panel is not None and len(coords_onshore_usable):
+        import tempfile
+        _tmp = tempfile.mkdtemp()
+        *_drop, _on_cat = pv_capacity_factors(
+            cutout, coords_onshore_usable, pv_solar_panel,
+            pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
+            timeframe="catcalc", filename="_catcalc", output_dir=_tmp,
+            return_categories=True)
+        coords_onshore_usable = coords_onshore_usable.merge(
+            _on_cat[["coords", "category"]], on="coords", how="left")
+        if len(coords_rooftop_usable):
+            *_drop, _rf_cat = pv_capacity_factors(
+                cutout, coords_rooftop_usable, pv_solar_panel,
+                pv_slope=rooftop_pv_slope, pv_azimuth=rooftop_pv_azimuth,
+                timeframe="catcalc", filename="_catcalc", output_dir=_tmp,
+                tech_label="pv_rooftop", return_categories=True)
+            coords_rooftop_usable = coords_rooftop_usable.merge(
+                _rf_cat[["coords", "category"]], on="coords", how="left")
+
+    coords_onshore_usable.to_csv(
+        os.path.join(output_dir, f"{filename}_coords_onshore_usable.csv"), index=False)
     coords_rooftop_usable.to_csv(
         os.path.join(output_dir, f"{filename}_coords_rooftop_usable.csv"), index=False)
 
     coords_offshore_usable = None
     if coords_offshore is not None:
+        # offshore 'category' = depth_class (its natural site class)
         coords_offshore_usable = usable_offshore_coords(
             coords_offshore, exclude_files=offshore_exclude_files,
             exclude_layer=offshore_exclude_layer, exclude_query=offshore_exclude_query,
             exclude_buffer=offshore_exclude_buffer)
+        if "depth_class" in coords_offshore_usable.columns:
+            coords_offshore_usable["category"] = coords_offshore_usable["depth_class"]
         coords_offshore_usable.to_csv(
             os.path.join(output_dir, f"{filename}_coords_offshore_usable.csv"), index=False)
 
@@ -1677,3 +1732,62 @@ def plot_offshore_map(coords_offshore, shapes=None, offshore_file=None,
 
 
 
+
+
+def plot_usable_coords(coords, shapes=None, boundary_file=None, color_by="availability",
+                       categories=None, title=None, size=8, point_size=6, cmap="viridis"):
+    """Map usable cells (onshore / rooftop / offshore) colour-coded.
+
+    Generic version of plot_offshore_map for any usable-coords frame returned by
+    the GIS step (coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable).
+
+    coords        : DataFrame with x, y and the color_by column.
+    shapes        : optional region polygons drawn as grey outlines for context.
+    boundary_file : optional vector file (e.g. EEZ geojson) outlined in blue.
+    color_by      : column to colour by. Continuous (e.g. 'availability') -> colourbar;
+                    categorical (e.g. 'category', 'depth_class', 'region') -> legend.
+    categories    : optional [coords, category] DataFrame (from a CF function called
+                    with return_categories=True). Merged on 'coords' and used as the
+                    colour column; pass color_by='category' to colour inf/avg/opt.
+    title         : plot title (auto-generated if None).
+    """
+    import pandas as pd
+    df = coords.copy()
+    if categories is not None and "coords" in df.columns:
+        df = df.merge(categories[["coords", "category"]], on="coords", how="left")
+    if color_by not in df.columns:
+        # fall back to a sensible default per coord type
+        for alt in ("availability", "depth_class", "region"):
+            if alt in df.columns:
+                color_by = alt
+                break
+    pts = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df["x"], df["y"]),
+                           crs="EPSG:4326")
+
+    fig, ax = plt.subplots(figsize=(size, size))
+    if boundary_file is not None:
+        gpd.read_file(boundary_file).to_crs("EPSG:4326").boundary.plot(
+            ax=ax, edgecolor="steelblue", linewidth=0.6)
+    if shapes is not None:
+        shapes.to_crs("EPSG:4326").boundary.plot(ax=ax, edgecolor="grey", linewidth=0.5)
+
+    if color_by in pts.columns and pd.api.types.is_numeric_dtype(pts[color_by]):
+        pts.plot(ax=ax, column=color_by, cmap=cmap, markersize=point_size,
+                 legend=True, legend_kwds={"label": color_by, "shrink": 0.5})
+    elif color_by in pts.columns:
+        # fixed colour + order for the inf/avg/opt site quality classes
+        cat_colors = {"inf": "#d73027", "avg": "#fee090", "opt": "#1a9850"}
+        keys = (["inf", "avg", "opt"] if color_by == "category"
+                else sorted(pts[color_by].dropna().astype(str).unique()))
+        for key in keys:
+            grp = pts[pts[color_by].astype(str) == key]
+            if len(grp):
+                grp.plot(ax=ax, markersize=point_size, label=str(key),
+                         color=cat_colors.get(key))
+        ax.legend(title=color_by, fontsize=8)
+    else:
+        pts.plot(ax=ax, markersize=point_size)
+
+    ax.set_title(title or f"Usable cells ({len(pts)}) by {color_by}")
+    ax.set_xlabel("lon"); ax.set_ylabel("lat")
+    return ax
