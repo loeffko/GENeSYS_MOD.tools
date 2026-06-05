@@ -1148,7 +1148,7 @@ def _quiet_rasterio(verbose=False):
         logger.setLevel(prev)
 
 
-def calculate_and_plot_available_area(admin=None,cutout=None,shapes=None,regions_name_en=None,excluder=None,verbose=False):
+def calculate_and_plot_available_area(admin=None,cutout=None,shapes=None,regions_name_en=None,excluder=None,verbose=False,color=None):
     gp = shapes.loc[shapes.index].geometry.to_crs(excluder.crs)
     excluder.open_files()
     with _quiet_rasterio(verbose):
@@ -1163,22 +1163,23 @@ def calculate_and_plot_available_area(admin=None,cutout=None,shapes=None,regions
     # falling back to 'dim_0' when unnamed. Read it from the result so plotting works
     # for any region set / workflow rather than assuming 'dim_0'.
     shape_dim = AvailablityMatrix.dims[0]
+    _cmap = _availability_cmap(color)
 
     if admin == 1:
-        fg = AvailablityMatrix.plot(row=shape_dim, col_wrap=3, cmap="Greens")
+        fg = AvailablityMatrix.plot(row=shape_dim, col_wrap=3, cmap=_cmap)
         fg.set_titles("{value}")
         for i, c in enumerate(shapes.index):
             shapes.plot(ax=fg.axs.flatten()[i], edgecolor="k", color="None")
     else:
         for c in AvailablityMatrix[shape_dim].values:
             fig, ax = plt.subplots()
-            AvailablityMatrix.sel({shape_dim: c}).plot(cmap="Greens")
+            AvailablityMatrix.sel({shape_dim: c}).plot(cmap=_cmap)
             shapes.loc[[c]].plot(ax=ax, edgecolor="k", color="None")
             cutout.grid.plot(ax=ax, color="None", edgecolor="grey", ls=":")
 
     return AvailablityMatrix
 
-def calculate_and_plot_available_rooftops(admin=None,cutout=None,shapes=None,regions_name_en=None,cities=None,verbose=False):
+def calculate_and_plot_available_rooftops(admin=None,cutout=None,shapes=None,regions_name_en=None,cities=None,verbose=False,color=None):
     rooftops = shapes.loc[shapes.index].geometry.to_crs(cities.crs)
     cities.open_files()
     with _quiet_rasterio(verbose):
@@ -1190,20 +1191,33 @@ def calculate_and_plot_available_rooftops(admin=None,cutout=None,shapes=None,reg
         AvailabilityMatrix_Rooftop = cutout.availabilitymatrix(shapes, cities)
 
     shape_dim = AvailabilityMatrix_Rooftop.dims[0]
+    _cmap = _availability_cmap(color)
 
     if admin == 1:
-        fg = AvailabilityMatrix_Rooftop.plot(row=shape_dim, col_wrap=3, cmap="Greens")
+        fg = AvailabilityMatrix_Rooftop.plot(row=shape_dim, col_wrap=3, cmap=_cmap)
         fg.set_titles("{value}")
         for i, c in enumerate(shapes.index):
             shapes.plot(ax=fg.axs.flatten()[i], edgecolor="k", color="None")
     else:
         for c in AvailabilityMatrix_Rooftop[shape_dim].values:
             fig, ax = plt.subplots()
-            AvailabilityMatrix_Rooftop.sel({shape_dim: c}).plot(cmap="Greens")
+            AvailabilityMatrix_Rooftop.sel({shape_dim: c}).plot(cmap=_cmap)
             shapes.loc[[c]].plot(ax=ax, edgecolor="k", color="None")
             cutout.grid.plot(ax=ax, color="None", edgecolor="grey", ls=":")
 
     return AvailabilityMatrix_Rooftop
+
+def _availability_cmap(color=None):
+    """Colormap for availability maps. None -> 'Greens'; a named matplotlib
+    colormap is used as-is; a single colour (e.g. hex '#004664') builds a
+    white->colour ramp so low availability stays white."""
+    if color is None:
+        return "Greens"
+    if color in plt.colormaps():
+        return color
+    from matplotlib.colors import LinearSegmentedColormap
+    return LinearSegmentedColormap.from_list("avail", ["white", color])
+
 
 def equal_area_crs(shapes):
     """Region-agnostic equal-area CRS: a Lambert Azimuthal Equal-Area projection
@@ -1480,6 +1494,35 @@ def calculate_offshore_potentials(cutout, coords_offshore,
     ].sum().reset_index()
 
 
+def _split_capacity_by_category(coords_cat, cutout, cap_per_sqkm, percent_available,
+                                tech_label, area_crs=None):
+    """Split an onshore capacity into inf/avg/opt categories per region.
+
+    coords_cat : usable coords with columns x, y, region, availability, category
+                 (the inf/avg/opt site-quality label, from the q30/q70 CF split).
+    Returns a wide DataFrame indexed by region with columns
+    '{tech_label} {cat} [GW]' for cat in inf/avg/opt plus '{tech_label} Total [GW]'.
+    Capacity per cell = cell_area * availability * cap_per_sqkm * percent_available
+    / 1000, then summed per region x category. Reuses the categories already
+    computed for the usable coords, so no extra capacity-factor run is needed.
+    """
+    if coords_cat is None or coords_cat.empty or "category" not in coords_cat.columns:
+        return None
+    area = (cutout.grid.set_index(["y", "x"])
+            .to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6).rename("area_km2")
+    df = coords_cat.merge(area.reset_index(), on=["y", "x"], how="left")
+    df["cap_gw"] = (df["area_km2"] * df["availability"]
+                    * cap_per_sqkm * percent_available / 1000)
+    wide = df.pivot_table(index="region", columns="category", values="cap_gw",
+                          aggfunc="sum", observed=True)
+    # keep a consistent inf/avg/opt column order where present
+    order = [c for c in ["inf", "avg", "opt"] if c in wide.columns]
+    wide = wide[order] if order else wide
+    wide.columns = [f"{tech_label} {c} [GW]" for c in wide.columns]
+    wide[f"{tech_label} Total [GW]"] = wide.sum(axis=1)
+    return wide
+
+
 def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     excluder, cities, wind_excluder=None,
                                     regions=None, region_col="region",
@@ -1494,6 +1537,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     offshore_exclude_query=None, offshore_exclude_buffer=0,
                                     area_crs=None, output_dir="output/", filename="",
                                     plot=True, plot_cols=3, plot_size=3, verbose=False,
+                                    color=None,
                                     add_category=True, pv_solar_panel=None, wind_turbine=None,
                                     pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
                                     rooftop_pv_slope=25, rooftop_pv_azimuth=180):
@@ -1612,7 +1656,8 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             _wide["Offshore Wind Total [GW]"] = _wide.sum(axis=1)
             combined = combined.merge(_wide.reset_index(), on="region", how="left")
 
-    combined.to_csv(os.path.join(output_dir, f"{filename}_potentials_combined.csv"), index=False)
+    # NOTE: the combined CSV is written later (after the inf/avg/opt category split is
+    # available), so PV and onshore-wind capacities can be broken out per category.
 
     if plot and stitch_land is not None:
         # cell areas (km²) on the stitched (y, x) grid, in an equal-area projection,
@@ -1626,6 +1671,9 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
         # region outlines overlaid. Title shows the area-weighted mean availability
         # over covered cells (sum(availability*area) / sum(area)).
         from mpl_toolkits.axes_grid1 import make_axes_locatable
+        # colormap: 'color' lets the caller pick the high-availability colour (e.g.
+        # a hex like '#004664' -> white->colour ramp), or a named matplotlib colormap.
+        _cmap = _availability_cmap(color)
         # size the figure to the data's aspect so a wide, short map does not sit in a
         # square frame (which is what made the default colorbar look oversized).
         xext = float(stitch_land.x.max() - stitch_land.x.min())
@@ -1641,7 +1689,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             denom = float(w.sum())
             avg = float((stitched.where(covered) * w).sum() / denom) if denom > 0 else 0.0
             fig, ax = plt.subplots(figsize=(width, height))
-            im = stitched.plot(ax=ax, cmap="Greens", add_colorbar=False)
+            im = stitched.plot(ax=ax, cmap=_cmap, add_colorbar=False)
             shapes_all.boundary.plot(ax=ax, edgecolor="k", linewidth=0.5)
             # colorbar tied to the map axes -> same height as the chart, thin width
             cax = make_axes_locatable(ax).append_axes("right", size="3%", pad=0.1)
@@ -1686,6 +1734,28 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             return_categories=True)
         coords_wind_usable = coords_wind_usable.merge(
             _wd_cat[["coords", "category"]], on="coords", how="left")
+
+    # Split PV and onshore-wind potential into inf/avg/opt categories (q30/q70 site
+    # quality) and append as columns on the combined per-region table. Rooftop stays
+    # a single column (already in `combined`). Reuses the categories computed above.
+    if not combined.empty and "category" in coords_onshore_usable.columns:
+        _pv_split = _split_capacity_by_category(
+            coords_onshore_usable, cutout, pv_cap_per_sqkm, pv_percent_land_available,
+            "PV Capacity", area_crs=area_crs)
+        if _pv_split is not None:
+            combined = combined.merge(_pv_split.reset_index(), on="region", how="left")
+    # wind uses its own usable set (own excluder) if present, else the PV land set
+    _wind_cat_src = (coords_wind_usable if (wind_excluder is not None
+                     and "category" in coords_wind_usable.columns)
+                     else coords_onshore_usable)
+    if not combined.empty and "category" in _wind_cat_src.columns:
+        _wd_split = _split_capacity_by_category(
+            _wind_cat_src, cutout, wind_cap_per_sqkm, wind_percent_land_available,
+            "Wind Capacity", area_crs=area_crs)
+        if _wd_split is not None:
+            combined = combined.merge(_wd_split.reset_index(), on="region", how="left")
+
+    combined.to_csv(os.path.join(output_dir, f"{filename}_potentials_combined.csv"), index=False)
 
     coords_onshore_usable.to_csv(
         os.path.join(output_dir, f"{filename}_coords_onshore_usable.csv"), index=False)
