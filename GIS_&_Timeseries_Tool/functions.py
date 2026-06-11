@@ -1342,16 +1342,35 @@ def make_land_excluder(land_cover_raster, exclude_codes, crs=None, raster_crs=No
     if isinstance(files, (str, os.PathLike, gpd.GeoDataFrame)):
         files = [files]
     for pf in files:
-        if isinstance(pf, gpd.GeoDataFrame):
-            gdf = pf
-        elif protected_layer:
-            gdf = gpd.read_file(pf, layer=protected_layer)  # e.g. a layer in a GeoPackage
-        else:
-            gdf = gpd.read_file(pf)
-        if protected_query:
-            gdf = gdf.query(protected_query)
+        gdf = _load_vector(pf, layer=protected_layer if not isinstance(pf, gpd.GeoDataFrame) else None,
+                           query=protected_query)
         excluder.add_geometry(gdf, buffer=protected_buffer)
     return excluder
+
+
+# Session cache for exclusion-layer vector reads. Big sources (PAD-US: 656k
+# features, ~50 s per read) get re-read for every excluder build / scenario /
+# offshore exclusion; caching the FILTERED result by (path, layer, query) makes
+# repeats free while keeping memory bounded (only the subsets are kept).
+_VECTOR_CACHE = {}
+
+
+def _load_vector(src, layer=None, query=None):
+    """Read a vector source with an optional pandas query, cached per session.
+
+    src may be a path or an in-memory GeoDataFrame (returned filtered, uncached).
+    Call _VECTOR_CACHE.clear() to free memory or pick up changed files.
+    """
+    if isinstance(src, gpd.GeoDataFrame):
+        return src.query(query) if query else src
+    key = (str(src), layer, query)
+    if key in _VECTOR_CACHE:
+        return _VECTOR_CACHE[key]
+    gdf = gpd.read_file(src, layer=layer) if layer else gpd.read_file(src)
+    if query:
+        gdf = gdf.query(query)
+    _VECTOR_CACHE[key] = gdf
+    return gdf
 
 
 def ordinance_effective_bans(ordinance_file, hub_height_m, rotor_diameter_m,
@@ -1372,9 +1391,7 @@ def ordinance_effective_bans(ordinance_file, hub_height_m, rotor_diameter_m,
     hub_height_m / rotor_diameter_m: turbine dims (max-tip = hub + rotor/2).
     Region-agnostic; pass any reVX-format ordinance file.
     """
-    g = gpd.read_file(ordinance_file)
-    if query:
-        g = g.query(query)
+    g = _load_vector(ordinance_file, query=query)
     max_tip = hub_height_m + rotor_diameter_m / 2.0
 
     def _to_m(row):
@@ -1424,15 +1441,7 @@ def add_exclusion_layers(excluder, layers):
     Returns the same excluder (mutated) for chaining.
     """
     for spec in (layers or []):
-        src = spec["file"]
-        if isinstance(src, gpd.GeoDataFrame):
-            gdf = src
-        elif spec.get("layer"):
-            gdf = gpd.read_file(src, layer=spec["layer"])
-        else:
-            gdf = gpd.read_file(src)
-        if spec.get("query"):
-            gdf = gdf.query(spec["query"])
+        gdf = _load_vector(spec["file"], layer=spec.get("layer"), query=spec.get("query"))
         excluder.add_geometry(gdf, buffer=spec.get("buffer", 0))
     return excluder
 
@@ -1537,7 +1546,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     offshore_exclude_query=None, offshore_exclude_buffer=0,
                                     area_crs=None, output_dir="output/", filename="",
                                     plot=True, plot_cols=3, plot_size=3, verbose=False,
-                                    color=None,
+                                    color=None, matrix_cache=None,
                                     add_category=True, pv_solar_panel=None, wind_turbine=None,
                                     pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
                                     rooftop_pv_slope=25, rooftop_pv_azimuth=180):
@@ -1586,9 +1595,19 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
         # 'land' is the PV/shared land matrix; 'wind' uses a separate excluder when
         # given (e.g. extra exclusions that apply to onshore wind only, like federal
         # land or county wind bans), else it falls back to the same land matrix.
+        # matrix_cache (an externally supplied dict) reuses land/roof matrices across
+        # repeated calls with the same excluder/cities - e.g. scenario sweeps where
+        # only the wind excluder changes - skipping their recomputation entirely.
         with _quiet_rasterio(verbose):
-            land = cutout.availabilitymatrix(shapes, excluder, disable_progressbar=True)
-            roof = cutout.availabilitymatrix(shapes, cities, disable_progressbar=True)
+            if matrix_cache is not None and (name, "land") in matrix_cache:
+                land = matrix_cache[(name, "land")]
+                roof = matrix_cache[(name, "roof")]
+            else:
+                land = cutout.availabilitymatrix(shapes, excluder, disable_progressbar=True)
+                roof = cutout.availabilitymatrix(shapes, cities, disable_progressbar=True)
+                if matrix_cache is not None:
+                    matrix_cache[(name, "land")] = land
+                    matrix_cache[(name, "roof")] = roof
             wind = (cutout.availabilitymatrix(shapes, wind_excluder, disable_progressbar=True)
                     if wind_excluder is not None else land)
 
@@ -1837,12 +1856,22 @@ def _drop_points_in_geometries(df, exclude_files, exclude_layer=None,
                            crs="EPSG:4326")
     keep = pts
     for ef in files:
-        gdf = ef if isinstance(ef, gpd.GeoDataFrame) else (
-            gpd.read_file(ef, layer=exclude_layer) if exclude_layer
-            else gpd.read_file(ef))
-        if exclude_query:
-            gdf = gdf.query(exclude_query)
+        gdf = _load_vector(ef, layer=exclude_layer if not isinstance(ef, gpd.GeoDataFrame) else None,
+                           query=exclude_query)
         gdf = gdf.to_crs("EPSG:4326")
+        # Sanitize: invalid polygons give wrong point-in-polygon answers. The PAD-US
+        # Marine layer e.g. stores Papahanaumokuakea (Hawaii) as an invalid bowtie
+        # crossing the antimeridian, which falsely 'contains' most of the globe and
+        # silently wiped all Gulf/Atlantic offshore cells. Repair invalid geometries
+        # and drop antimeridian-wrap artifacts (lon span >= 180 deg).
+        gdf = gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
+        invalid = ~gdf.geometry.is_valid
+        if invalid.any():
+            gdf.loc[invalid, "geometry"] = gdf.loc[invalid, "geometry"].make_valid()
+        b = gdf.geometry.bounds
+        wrap = (b["maxx"] - b["minx"]) >= 180
+        if wrap.any():
+            gdf = gdf[~wrap]
         if exclude_buffer:
             # buffer in metres via an equal-area projection centred on the data
             aea = equal_area_crs(keep)
