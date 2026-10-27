@@ -11,6 +11,8 @@ source: https://nrel.github.io/turbine-models/2020ATB_NREL_Reference_15MW_240.ht
 
 # Hub height in meters
 HUB_HEIGHT: 150
+# Rotor diameter in meters
+ROTOR_DIAMETER: 240
 # Power curve, specified as lists of velocities and powers, including
 # cut-in and cut-out speeds
 # Power curve velocities in m/s

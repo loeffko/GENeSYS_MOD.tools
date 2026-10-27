@@ -11,6 +11,8 @@ source: https://nrel.github.io/turbine-models/2020ATB_NREL_Reference_7MW_200.htm
 
 # Hub height in meters
 HUB_HEIGHT: 175
+# Rotor diameter in meters
+ROTOR_DIAMETER: 198
 # Power curve, specified as lists of velocities and powers, including
 # cut-in and cut-out speeds
 # Power curve velocities in m/s

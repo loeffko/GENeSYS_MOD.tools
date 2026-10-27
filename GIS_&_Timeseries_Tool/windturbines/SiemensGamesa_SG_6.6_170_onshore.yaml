@@ -1,0 +1,19 @@
+# Turbine characteristic data
+name: SG 6.6-170
+# The manufacturer of this turbine
+manufacturer: Siemens Gamesa
+# Link to the original datasheet of the turbine
+source: https://www.siemensgamesa.com/products-and-services/onshore/wind-turbine-sg-6-6-170
+# Note: power curve approximated from the public product specification
+#       (rated 6.6 MW, rotor 170 m); intended for energy-yield estimates.
+
+# Hub height in meters (a common onshore option for this platform)
+HUB_HEIGHT: 115.0
+# Rotor diameter in meters
+ROTOR_DIAMETER: 170
+# Power curve, specified as lists of velocities and powers, including
+# cut-in and cut-out speeds
+# Power curve velocities in m/s
+V: [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 25, 25]
+# Generated power from the power curves in MW
+POW: [0.000, 0.000, 0.250, 0.600, 1.100, 1.800, 2.750, 3.900, 5.150, 6.150, 6.550, 6.600, 6.600, 6.600, 0.000]

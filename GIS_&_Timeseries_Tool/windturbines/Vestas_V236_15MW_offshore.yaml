@@ -1,0 +1,19 @@
+# Turbine characteristic data
+name: V236-15.0 MW
+# The manufacturer of this turbine
+manufacturer: Vestas
+# Link to the original datasheet of the turbine
+source: https://www.vestas.com/en/products/offshore/V236-15MW
+# Note: power curve approximated from the public product specification
+#       (15 MW rated, rotor 236 m).
+
+# Hub height in meters (site-specific; ~145 m is a typical value)
+HUB_HEIGHT: 145.0
+# Rotor diameter in meters
+ROTOR_DIAMETER: 236
+# Power curve, specified as lists of velocities and powers, including
+# cut-in and cut-out speeds
+# Power curve velocities in m/s
+V: [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 25, 25]
+# Generated power from the power curves in MW
+POW: [0.000, 0.000, 0.600, 1.300, 2.300, 3.750, 5.650, 8.100, 10.900, 13.300, 14.600, 15.000, 15.000, 15.000, 0.000]

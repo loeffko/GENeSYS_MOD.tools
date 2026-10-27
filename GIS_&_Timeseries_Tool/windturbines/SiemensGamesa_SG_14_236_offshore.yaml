@@ -1,0 +1,19 @@
+# Turbine characteristic data
+name: SG 14-236 DD
+# The manufacturer of this turbine
+manufacturer: Siemens Gamesa
+# Link to the original datasheet of the turbine
+source: https://www.siemensgamesa.com/products-and-services/offshore/wind-turbine-sg-14-236-dd
+# Note: power curve approximated from the public product specification
+#       (14 MW rated, up to 15 MW with Power Boost, rotor 236 m).
+
+# Hub height in meters (site-specific; ~135 m is a typical value)
+HUB_HEIGHT: 135.0
+# Rotor diameter in meters
+ROTOR_DIAMETER: 236
+# Power curve, specified as lists of velocities and powers, including
+# cut-in and cut-out speeds
+# Power curve velocities in m/s
+V: [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 25, 25]
+# Generated power from the power curves in MW
+POW: [0.000, 0.000, 0.550, 1.200, 2.150, 3.500, 5.300, 7.600, 10.200, 12.600, 13.800, 14.000, 14.000, 14.000, 0.000]

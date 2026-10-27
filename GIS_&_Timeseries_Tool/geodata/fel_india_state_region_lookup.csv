@@ -1,0 +1,37 @@
+state_name,region_code,region_id,region_name,area_km2
+"Andaman and Nicobar Islands",ISL,IND-ISL,"Isolated Island Systems",5737.2
+"Andhra Pradesh",SR,IND-SR,"Southern Region",162405.9
+"Arunachal Pradesh",NER,IND-NER,"North Eastern Region",81441.5
+"Assam",NER,IND-NER,"North Eastern Region",78203.7
+"Bihar",ER,IND-ER,"Eastern Region",93724.1
+"Chandigarh",NR,IND-NR,"Northern Region",80.8
+"Chhattisgarh",WR,IND-WR,"Western Region",134907.1
+"Dadra and Nagar Haveli and Daman and Diu",WR,IND-WR,"Western Region",530.5
+"Delhi",NR,IND-NR,"Northern Region",1393.7
+"Goa",WR,IND-WR,"Western Region",3526.1
+"Gujarat",WR,IND-WR,"Western Region",182693.2
+"Haryana",NR,IND-NR,"Northern Region",44317.7
+"Himachal Pradesh",NR,IND-NR,"Northern Region",55675.7
+"Jammu and Kashmir",NR,IND-NR,"Northern Region",42214.0
+"Jharkhand",ER,IND-ER,"Eastern Region",79773.4
+"Karnataka",SR,IND-SR,"Southern Region",191674.6
+"Kerala",SR,IND-SR,"Southern Region",38397.5
+"Ladakh",NR,IND-NR,"Northern Region",63062.2
+"Lakshadweep",ISL,IND-ISL,"Isolated Island Systems",1.8
+"Madhya Pradesh",WR,IND-WR,"Western Region",308024.0
+"Maharashtra",WR,IND-WR,"Western Region",307162.6
+"Manipur",NER,IND-NER,"North Eastern Region",22017.9
+"Meghalaya",NER,IND-NER,"North Eastern Region",22307.9
+"Mizoram",NER,IND-NER,"North Eastern Region",20832.0
+"Nagaland",NER,IND-NER,"North Eastern Region",16701.8
+"Odisha",ER,IND-ER,"Eastern Region",155229.7
+"Puducherry",SR,IND-SR,"Southern Region",273.0
+"Punjab",NR,IND-NR,"Northern Region",50097.4
+"Rajasthan",NR,IND-NR,"Northern Region",342156.5
+"Sikkim",ER,IND-ER,"Eastern Region",6947.3
+"Tamil Nadu",SR,IND-SR,"Southern Region",130027.6
+"Telangana",SR,IND-SR,"Southern Region",112327.2
+"Tripura",NER,IND-NER,"North Eastern Region",9954.2
+"Uttar Pradesh",NR,IND-NR,"Northern Region",240860.8
+"Uttarakhand",NR,IND-NR,"Northern Region",52972.1
+"West Bengal",ER,IND-ER,"Eastern Region",82675.5

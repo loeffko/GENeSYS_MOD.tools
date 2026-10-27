@@ -1804,6 +1804,398 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable)
 
 
+def run_batch_by_tile(tiles, geo_file, timeframe, filename,
+                      dx=0.275, dy=0.275, bbox_buffer=1.0, folder="cutouts/", module="era5",
+                      offshore_file=None, bathymetry_file=None, admin=0,
+                      solar_panel=None, onshore_turbine='Vestas_V112_3MW',
+                      offshore_turbine='Vestas_V112_3MW',
+                      pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
+                      rooftop_pv_slope=25, rooftop_pv_azimuth=180,
+                      excluder=None, cities=None, wind_excluder=None,
+                      tile_layers=None,
+                      pv_cap_per_sqkm=100, pv_percent_land_available=0.03,
+                      wind_cap_per_sqkm=27, wind_percent_land_available=0.03,
+                      rooftop_cap_per_sqkm=100, rooftop_percent_area_available=0.2,
+                      offshore_cap_per_sqkm=5, offshore_percent_available=0.1,
+                      offshore_exclude_files=None, offshore_exclude_layer=None,
+                      offshore_exclude_query=None, offshore_exclude_buffer=0,
+                      usable_threshold=0.01, usable_threshold_rooftop=None, usable_round_to=2,
+                      run_pv=True, run_wind_onshore=True, run_wind_offshore=True,
+                      run_temperature=True, run_potentials=True,
+                      estimate_only=False, skip_if_combined_exists=False,
+                      keep_per_tile_files=True,
+                      output_dir='output/', region_col='region', area_crs=None,
+                      plot=False, verbose=False, color=None):
+    """Batch a continent-scale region-geojson into country-group TILES.
+
+    Splits a large area into disjoint country-group tiles, builds ONE small ERA5
+    cutout per tile, runs the full pipeline (capacity factors + GIS potentials) on
+    that tile, then frees the cutout before the next tile so peak RAM is bounded by
+    the largest single tile — not the whole extent. After the loop, the per-tile
+    results are combined into SINGLE combined outputs (one CSV per tech/category,
+    one combined potentials table, and a list of per-tile maps for
+    `combine_and_plot_tile_maps`). Per-tile files are intermediate byproducts.
+
+    Region-agnostic (per CLAUDE.md): tiles, polygons, exclusion layers, capacity
+    densities are all supplied by the caller. Requires the region-geojson workflow
+    (a literal `region` column, no `iso_a2`), because it drives everything off
+    `region` codes.
+
+    `tiles` is a dict {tile_name: [region_code, ...]}. Every region must appear in
+    exactly one tile (disjoint). Each tile's cutout bbox is computed from its member
+    polygons (+ `bbox_buffer` degrees) and passed to `get_cutout` as explicit NW/SE
+    corners — necessary because `get_cutout`/`_determine_cutout_bounds` ignore
+    `regions=` for a region-geojson and would otherwise span the whole file. The
+    ERA5 chunk cache (`cutouts/era5_cache/`) is shared, so overlapping tile bboxes
+    reuse downloads.
+
+    `tile_layers` optionally overrides the exclusion / offshore layers per tile, so
+    one batch can mix land-cover sources (e.g. a CORINE raster for some tiles and an
+    ESA WorldCover raster for others) and give each coastal tile its own bathymetry.
+    It is `None` or a dict {tile_name: spec}; every key of `spec` is optional and
+    falls back to the matching global argument when absent, so an unlisted tile (or
+    an empty spec) behaves exactly as it does with `tile_layers=None`. Recognised
+    (region-agnostic) keys:
+      - land_raster            : this tile's land-cover raster; when set, the tile's
+                                 land + rooftop excluders are BUILT here from the spec
+                                 (else the global `excluder`/`cities` are used).
+      - land_exclude_codes     : raster values to mark unavailable (land excluder).
+      - rooftop_codes          : built-up raster values kept for the rooftop proxy.
+      - raster_crs             : analysis CRS for the excluder. None -> the raster's
+                                 native CRS (fast; use for an already-metre raster like
+                                 CORINE/EPSG:3035). The sentinel "__equal_area__" ->
+                                 `equal_area_crs(tile_shapes)` (use for a geographic
+                                 raster like WorldCover/EPSG:4326, per the projected-CRS
+                                 gotcha — a degrees CRS makes land availability zero).
+      - raster_declared_crs    : CRS to assign a raster that declares none of its own
+                                 (passed as make_land_excluder(raster_crs=...)).
+      - protected_files / protected_query / protected_layer / protected_buffer :
+                                 protected-area layer for this tile's excluders.
+      - wind_extra_layers      : list of add_exclusion_layers() specs -> a wind-only
+                                 excluder = land excluder + these extra no-build layers.
+      - offshore_file / bathymetry_file : this tile's EEZ + bathymetry (set
+                                 offshore_file to None to force a tile landlocked).
+      - offshore_exclude_files / _layer / _query / _buffer : offshore exclusion for
+                                 this tile's potentials.
+    Per-tile excluders are built lazily inside the loop and freed with the cutout.
+
+    Returns a dict:
+      - "cf"                  : {family: combined (time x all-regions) DataFrame}
+      - "potentials_combined" : one row per region (all tiles concatenated)
+      - "maps"                : [(tile, stitch_land, stitch_roof, bounds), ...]
+      - "estimates"           : {tile: size dict from estimate_cutout_size}
+      - "tiles_run"/"tiles_skipped"/"missing_codes"
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    gdf = gpd.read_file(geo_file).to_crs("EPSG:4326")
+    if region_col not in gdf.columns or "iso_a2" in gdf.columns:
+        raise ValueError(
+            f"run_batch_by_tile needs the region-geojson workflow: geo_file must have "
+            f"a '{region_col}' column and NO 'iso_a2' column. Got columns "
+            f"{list(gdf.columns)}. Drop 'iso_a2' from the geojson first.")
+    available = set(gdf[region_col])
+
+    # Validate the TILES dict: disjoint (each region in exactly one tile), and warn
+    # about codes that are missing from the geojson or regions no tile covers.
+    seen = {}
+    for tile, codes in tiles.items():
+        for c in codes:
+            if c in seen:
+                raise ValueError(
+                    f"Region '{c}' appears in both tile '{seen[c]}' and tile '{tile}'. "
+                    f"Each region must be in exactly one tile (no double-counting).")
+            seen[c] = tile
+    missing_codes = sorted(c for c in seen if c not in available)
+    if missing_codes:
+        print(f"Warning: {len(missing_codes)} tile code(s) not in the geojson, skipped: {missing_codes}")
+    uncovered = sorted(available - set(seen))
+    if uncovered:
+        print(f"Note: {len(uncovered)} region(s) in the geojson are in no tile: {uncovered}")
+
+    # Per-family accumulators of per-tile (time x region) frames, concatenated at the
+    # end. Families match the existing output naming so the combined CSVs are drop-in.
+    cf_parts = {}
+    potentials_parts = []
+    maps = []
+    estimates = {}
+    tiles_run, tiles_skipped = [], []
+
+    def _accum(family, frame):
+        if frame is not None and not frame.empty:
+            cf_parts.setdefault(family, []).append(frame)
+
+    for tile, codes in tiles.items():
+        tile_codes = [c for c in codes if c in available]
+        if not tile_codes:
+            print(f"Tile '{tile}': no valid region codes, skipping.")
+            tiles_skipped.append(tile)
+            continue
+        tile_filename = f"{filename}_{tile}"
+        print(f"\n=== Tile '{tile}' -> {tile_codes} (filename={tile_filename}) ===")
+
+        # Resume: if this tile's combined potentials CSV already exists, read the
+        # per-tile results back instead of rebuilding the cutout.
+        pot_csv = os.path.join(output_dir, f"{tile_filename}_potentials_combined.csv")
+        if skip_if_combined_exists and os.path.exists(pot_csv):
+            print(f"Tile '{tile}': per-tile outputs exist, reading back and skipping build.")
+            potentials_parts.append(pd.read_csv(pot_csv))
+            for fam, (tech, cat) in _CF_FAMILY_FILES.items():
+                p = os.path.join(output_dir, f"{timeframe}_{tile_filename}_{tech}_{cat}.csv")
+                if os.path.exists(p):
+                    _accum(fam, pd.read_csv(p, index_col=0))
+            for fam in ("temperature", "heating", "cooling", "heatpump_cop", "heatpump_ground_cop"):
+                p = os.path.join(output_dir, f"{timeframe}_{fam}_{tile_filename}.csv")
+                if os.path.exists(p):
+                    _accum(fam, pd.read_csv(p, index_col=0))
+            tiles_run.append(tile)
+            continue
+
+        # Tile bbox from its member polygons; explicit corners win over the
+        # region-geojson branch in get_cutout/_determine_cutout_bounds.
+        tile_shapes = gdf[gdf[region_col].isin(tile_codes)]
+        minx, miny, maxx, maxy = tile_shapes.total_bounds
+        nw = (maxy + bbox_buffer, minx - bbox_buffer)   # (lat, lon)
+        se = (miny - bbox_buffer, maxx + bbox_buffer)   # (lat, lon)
+
+        # Per-tile layer overrides (empty when this tile has no tile_layers entry, so
+        # every lookup below falls back to the corresponding global argument).
+        spec = (tile_layers or {}).get(tile, {})
+
+        est = estimate_cutout_size(timeframe, cutout_north_west=nw, cutout_south_east=se,
+                                   dx=dx, dy=dy)
+        estimates[tile] = est
+        if estimate_only:
+            tiles_run.append(tile)
+            continue
+
+        cutout = get_cutout(tile_filename, timeframe, module=module,
+                            cutout_north_west=nw, cutout_south_east=se,
+                            dx=dx, dy=dy, folder=folder)
+
+        # Per-tile EEZ / bathymetry override, else the global args. `in spec` is
+        # checked so an explicit None (force landlocked) is honoured over the global.
+        tile_offshore = spec["offshore_file"] if "offshore_file" in spec else offshore_file
+        tile_bathymetry = spec["bathymetry_file"] if "bathymetry_file" in spec else bathymetry_file
+        coords_onshore, coords_offshore = get_coords(
+            cutout, tile_codes, geo_file, admin=admin,
+            offshore_file=tile_offshore, bathymetry_file=tile_bathymetry)
+        has_offshore = coords_offshore is not None and not coords_offshore.empty
+
+        tile_area_crs = area_crs or equal_area_crs(tile_shapes)
+
+        # --- capacity factors (each writes per-tile CSVs, returns time x region) ---
+        if run_pv and solar_panel is not None:
+            pv_inf, pv_avg, pv_opt = pv_capacity_factors(
+                cutout, coords_onshore, solar_panel,
+                pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
+                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
+            _accum("pv_inf", pv_inf); _accum("pv_avg", pv_avg); _accum("pv_opt", pv_opt)
+
+        if run_wind_onshore:
+            wo_inf, wo_avg, wo_opt = wind_onshore_capacity_factors(
+                cutout, coords_onshore, onshore_turbine,
+                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
+            _accum("wind_onshore_inf", wo_inf); _accum("wind_onshore_avg", wo_avg)
+            _accum("wind_onshore_opt", wo_opt)
+
+        if run_wind_offshore and has_offshore:
+            ws, wt, wd = wind_offshore_capacity_factors(
+                cutout, coords_offshore, offshore_turbine,
+                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
+            _accum("wind_offshore_shallow", ws)
+            _accum("wind_offshore_transitional", wt)
+            _accum("wind_offshore_deep", wd)
+
+        if run_temperature:
+            hp_ground, cooling, heating, hp_cop = temperature_timeseries(
+                cutout, coords_onshore,
+                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
+            _accum("heatpump_ground_cop", hp_ground); _accum("cooling", cooling)
+            _accum("heating", heating); _accum("heatpump_cop", hp_cop)
+            # plain temperature is written to CSV but not returned; read it back.
+            tpath = os.path.join(output_dir, f"{timeframe}_temperature_{tile_filename}.csv")
+            if os.path.exists(tpath):
+                _accum("temperature", pd.read_csv(tpath, index_col=0))
+
+        # --- resolve this tile's exclusion layers (per-tile raster or globals) ---
+        # When the spec names a land_raster, build the tile's land + rooftop (+ wind)
+        # excluders here from its own codes/CRS; otherwise reuse the global ones. This
+        # lets one batch mix land-cover sources (e.g. CORINE vs WorldCover) without any
+        # region logic in this function — everything comes from the opaque spec dict.
+        tile_excluder = excluder
+        tile_cities = cities
+        tile_wind_excluder = wind_excluder
+        if spec.get("land_raster"):
+            _crs = spec.get("raster_crs")
+            if _crs == "__equal_area__":            # geographic raster -> per-tile LAEA
+                _crs = equal_area_crs(tile_shapes)
+            _declared = spec.get("raster_declared_crs")
+            tile_excluder = make_land_excluder(
+                spec["land_raster"], spec["land_exclude_codes"],
+                crs=_crs, raster_crs=_declared,
+                protected_files=spec.get("protected_files"),
+                protected_query=spec.get("protected_query"),
+                protected_layer=spec.get("protected_layer"),
+                protected_buffer=spec.get("protected_buffer", 0))
+            tile_cities = make_rooftop_excluder(
+                spec["land_raster"], spec.get("rooftop_codes", [50]),
+                crs=_crs, raster_crs=_declared)
+            if spec.get("wind_extra_layers"):
+                tile_wind_excluder = make_land_excluder(
+                    spec["land_raster"], spec["land_exclude_codes"],
+                    crs=_crs, raster_crs=_declared,
+                    protected_files=spec.get("protected_files"),
+                    protected_query=spec.get("protected_query"),
+                    protected_layer=spec.get("protected_layer"),
+                    protected_buffer=spec.get("protected_buffer", 0))
+                add_exclusion_layers(tile_wind_excluder, spec["wind_extra_layers"])
+
+        # --- GIS potentials (memory-safe per region inside) ---
+        if run_potentials and tile_excluder is not None and tile_cities is not None:
+            (combined_df, stitch_land, stitch_roof,
+             _con_u, _crf_u, _coff_u) = calculate_potentials_per_region(
+                cutout, geo_file, coords_onshore, tile_excluder, tile_cities,
+                wind_excluder=tile_wind_excluder, regions=tile_codes, region_col=region_col,
+                coords_offshore=(coords_offshore if has_offshore else None),
+                pv_cap_per_sqkm=pv_cap_per_sqkm, pv_percent_land_available=pv_percent_land_available,
+                wind_cap_per_sqkm=wind_cap_per_sqkm, wind_percent_land_available=wind_percent_land_available,
+                rooftop_cap_per_sqkm=rooftop_cap_per_sqkm,
+                rooftop_percent_area_available=rooftop_percent_area_available,
+                offshore_cap_per_sqkm=offshore_cap_per_sqkm,
+                offshore_percent_available=offshore_percent_available,
+                offshore_exclude_files=spec.get("offshore_exclude_files", offshore_exclude_files),
+                offshore_exclude_layer=spec.get("offshore_exclude_layer", offshore_exclude_layer),
+                offshore_exclude_query=spec.get("offshore_exclude_query", offshore_exclude_query),
+                offshore_exclude_buffer=spec.get("offshore_exclude_buffer", offshore_exclude_buffer),
+                usable_threshold=usable_threshold,
+                usable_threshold_rooftop=usable_threshold_rooftop,
+                usable_round_to=usable_round_to,
+                area_crs=tile_area_crs, output_dir=output_dir, filename=tile_filename,
+                pv_solar_panel=solar_panel, wind_turbine=onshore_turbine,
+                pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
+                rooftop_pv_slope=rooftop_pv_slope, rooftop_pv_azimuth=rooftop_pv_azimuth,
+                plot=plot, verbose=verbose, color=color)
+            potentials_parts.append(combined_df)
+            maps.append((tile, stitch_land, stitch_roof,
+                         (minx - bbox_buffer, miny - bbox_buffer,
+                          maxx + bbox_buffer, maxy + bbox_buffer)))
+
+        # --- free the cutout before the next tile (RAM discipline) ---
+        cutout.data.close()
+        del cutout, coords_onshore, coords_offshore
+        if tile_excluder is not excluder:   # drop only the tile-local excluders
+            del tile_excluder, tile_cities, tile_wind_excluder
+        gc.collect()
+        tiles_run.append(tile)
+
+        if not keep_per_tile_files:
+            import glob
+            for p in glob.glob(os.path.join(output_dir, f"*{tile_filename}*.csv")):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    if estimate_only:
+        total_gb = sum(e.get("raw_gb", 0) for e in estimates.values())
+        peak_gb = max((e.get("raw_gb", 0) for e in estimates.values()), default=0)
+        print(f"\nEstimate: {len(estimates)} tiles, sum ~{total_gb:.2f} GB uncompressed, "
+              f"peak single tile ~{peak_gb:.2f} GB (bounds peak RAM). No download performed.")
+        return {"cf": {}, "potentials_combined": None, "maps": [], "estimates": estimates,
+                "tiles_run": tiles_run, "tiles_skipped": tiles_skipped,
+                "missing_codes": missing_codes}
+
+    # --- combine: one combined CSV per family under the BASE filename ---
+    cf_combined = {}
+    for fam, parts in cf_parts.items():
+        # tiles are disjoint in region columns and share the hourly time index, so a
+        # horizontal concat aligns on time and unions the region columns cleanly.
+        lengths = {len(p) for p in parts}
+        if len(lengths) > 1:
+            print(f"Warning: family '{fam}' has tiles with different index lengths "
+                  f"{lengths}; concat will align on the time index (NaN-fill mismatches).")
+        combined = pd.concat(parts, axis=1)
+        combined = combined.loc[:, ~combined.columns.duplicated()]
+        cf_combined[fam] = combined
+        if fam in _CF_FAMILY_FILES:
+            tech, cat = _CF_FAMILY_FILES[fam]
+            combined.to_csv(os.path.join(output_dir, f"{timeframe}_{filename}_{tech}_{cat}.csv"))
+        else:  # temperature families: {timeframe}_{fam}_{filename}.csv
+            combined.to_csv(os.path.join(output_dir, f"{timeframe}_{fam}_{filename}.csv"))
+
+    potentials_combined = None
+    if potentials_parts:
+        potentials_combined = pd.concat(potentials_parts, ignore_index=True)
+        # offshore columns absent for landlocked tiles -> outer-union NaN; fill 0.
+        _off_cols = [c for c in potentials_combined.columns if "Offshore" in c]
+        if _off_cols:
+            potentials_combined[_off_cols] = potentials_combined[_off_cols].fillna(0)
+        potentials_combined.to_csv(
+            os.path.join(output_dir, f"{filename}_potentials_combined.csv"), index=False)
+
+    print(f"\nBatch done: {len(tiles_run)} tiles run, {len(tiles_skipped)} skipped. "
+          f"Combined CSVs written under base filename '{filename}'.")
+    return {"cf": cf_combined, "potentials_combined": potentials_combined, "maps": maps,
+            "estimates": estimates, "tiles_run": tiles_run, "tiles_skipped": tiles_skipped,
+            "missing_codes": missing_codes}
+
+
+# Maps a combined-CF family name to the (tech, category) tokens used in the
+# pivot_and_categorize output filenames ({timeframe}_{filename}_{tech}_{cat}.csv).
+_CF_FAMILY_FILES = {
+    "pv_inf": ("pv", "inf"), "pv_avg": ("pv", "avg"), "pv_opt": ("pv", "opt"),
+    "wind_onshore_inf": ("wind_onshore", "inf"),
+    "wind_onshore_avg": ("wind_onshore", "avg"),
+    "wind_onshore_opt": ("wind_onshore", "opt"),
+    "wind_offshore_shallow": ("wind_offshore", "shallow"),
+    "wind_offshore_transitional": ("wind_offshore", "transitional"),
+    "wind_offshore_deep": ("wind_offshore", "deep"),
+}
+
+
+def combine_and_plot_tile_maps(map_list, which="land", geo_file=None, color=None,
+                               ax=None, plot_size=8):
+    """Plot the per-tile availability maps from run_batch_by_tile on ONE axis.
+
+    Each tile's stitched availability is an xr.DataArray(y, x) over that tile's own
+    cutout grid (different extent/shape per tile). The tiles are spatially disjoint
+    (regions disjoint; the small bbox buffer overlaps only in empty sea/border
+    cells), so painting each tile's array on a single shared axis by its geographic
+    extent yields one contiguous map with no resampling. `which` selects 'land' or
+    'rooftop'. Region outlines from `geo_file` are overlaid when given.
+    """
+    idx = 1 if which == "land" else 2  # (tile, stitch_land, stitch_roof, bounds)
+    arrays = [(t, m[idx], m[3]) for m in map_list
+              for t in [m[0]] if m[idx] is not None]
+    if not arrays:
+        print("No maps to plot.")
+        return None
+
+    vmax = max(float(a.max()) for _, a, _ in arrays if a.size) or 1.0
+    cmap = _availability_cmap(color)
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(plot_size, plot_size))
+    im = None
+    for _tile, arr, _bounds in arrays:
+        im = arr.plot(ax=ax, cmap=cmap, vmin=0, vmax=vmax, add_colorbar=False)
+
+    if geo_file is not None:
+        try:
+            gpd.read_file(geo_file).to_crs("EPSG:4326").boundary.plot(
+                ax=ax, edgecolor="k", linewidth=0.4)
+        except Exception as e:
+            print(f"Could not overlay region outlines: {e}")
+
+    if im is not None:
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        cax = make_axes_locatable(ax).append_axes("right", size="3%", pad=0.1)
+        plt.colorbar(im, cax=cax)
+    ax.set_title(f"{which.capitalize()} availability (combined across {len(arrays)} tiles)")
+    return ax
+
+
 def usable_onshore_coords(availability_matrix, coords_onshore, threshold=0.01,
                           round_to=2):
     """Filter onshore coordinates to the cells that are actually usable.

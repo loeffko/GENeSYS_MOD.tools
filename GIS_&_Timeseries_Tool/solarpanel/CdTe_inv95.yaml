@@ -1,0 +1,33 @@
+# CdTe panel (Huld 2010 model) with a modern inverter efficiency.
+# CdTe (First Solar) is the dominant US utility-scale module and has a lower
+# temperature coefficient than c-Si -> higher CF, especially in the hot sunbelt.
+# Only inverter_efficiency is raised vs the stock CdTe (0.90 -> 0.95); the Huld
+# k-params are unchanged. efficiency (0.1) sets capacity-per-m2 (POTENTIAL), not
+# CF, so it is left as-is here.
+
+model: huld
+name: CdTe_inv95
+source: Huld 2010 (CdTe), inverter_efficiency updated to 0.95
+
+# Used for calculating capacity per m2 (affects POTENTIAL, not CF)
+efficiency: 0.1
+
+ # Panel temperature coefficient of ambient temperature
+c_temp_amb: 1
+# Panel temperature coefficient of irradiance
+c_temp_irrad: 0.035 # 35 degC / (W/m2)
+
+# Reference conditions
+r_tamb: 293 # 20 degC
+r_tmod: 298 # 25 degC
+r_irradiance: 1000 # W/m^2
+
+# Fitting parameters
+k_1: -0.103251
+k_2: -0.040446
+k_3: -0.001667
+k_4: -0.002075
+k_5: -0.001445
+k_6: -0.000023
+
+inverter_efficiency: 0.95

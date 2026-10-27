@@ -11,6 +11,8 @@ source: http://nozebra.ipapercms.dk/Vestas/Communication/Productbrochure/V16470M
 
 # Hub height in meters
 HUB_HEIGHT: 100.0
+# Rotor diameter in meters
+ROTOR_DIAMETER: 164
 # Power curve, specified as lists of velocities and powers, including
 # cut-in and cut-out speeds
 # Power curve velocities in m/s

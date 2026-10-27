@@ -1,0 +1,19 @@
+# Turbine characteristic data
+name: V162-7.2 MW EnVentus
+# The manufacturer of this turbine
+manufacturer: Vestas
+# Link to the original datasheet of the turbine
+source: https://www.vestas.com/en/products/enventus-platform/V162-7-2-MW
+# Note: power curve approximated from the public product specification
+#       (EnVentus platform, rated up to 7.2 MW, rotor 162 m).
+
+# Hub height in meters (a common onshore option for this platform)
+HUB_HEIGHT: 119.0
+# Rotor diameter in meters
+ROTOR_DIAMETER: 162
+# Power curve, specified as lists of velocities and powers, including
+# cut-in and cut-out speeds
+# Power curve velocities in m/s
+V: [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 25, 25]
+# Generated power from the power curves in MW
+POW: [0.000, 0.000, 0.300, 0.700, 1.250, 2.050, 3.150, 4.500, 5.900, 6.850, 7.150, 7.200, 7.200, 7.200, 0.000]
