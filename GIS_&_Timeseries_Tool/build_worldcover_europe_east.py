@@ -1,15 +1,15 @@
 """Build the CORINE-gap land-cover raster for the Europe-hub RES tool from ESA WorldCover 10m.
 
-The bundled `geodata/landcover/corine.tif` covers the nine European tiles but not the two
-easternmost ones: `turkey_levant` (TR/GE/AM/AZ/IL) and `central_asia`
-(KZ/UZ/TM/TJ/KG). This fills that gap by downloading the ESA WorldCover 2021 v200
-tiles over BOTH regions (public AWS S3, no auth), downsampling each to ~300 m by
-class-preserving mode resampling, and merging them into a single EPSG:4326 GeoTIFF:
+The bundled `geodata/landcover/corine.tif` (EEA39) has no data for the three
+easternmost tiles: `east` (UA/BY/MD), `turkey_levant` (TR/GE/AM/AZ/IL) and
+`central_asia` (KZ/UZ/TM/TJ/KG). This fills that gap by downloading the ESA WorldCover
+2021 v200 tiles over those regions (public AWS S3, no auth), downsampling each to ~300 m
+by class-preserving mode resampling, and merging them into a single EPSG:4326 GeoTIFF:
 
     geodata/landcover/worldcover_europe_east_300m.tif
 
-The two regions are NOT contiguous (a gap over Iran/Iraq lies between the Levant box
-and the Central-Asia box), so the candidate 3-deg tile set is the UNION of the two
+The regions are NOT contiguous (a gap over Iran/Iraq lies between the Levant box
+and the Central-Asia box), so the candidate 3-deg tile set is the UNION of the
 bounding boxes rather than one big box - that avoids downloading the whole width in
 between. Ocean/desert-of-no-tile cells 404 and are skipped; the merged raster fills any
 gap between the two regions with class 0 (which the notebook's WC_EXCLUDE lists, so it
@@ -35,11 +35,12 @@ OUT = os.path.join(GEODATA, "landcover", "worldcover_europe_east_300m.tif")
 TMPDIR = os.path.join(GEODATA, "_cache", "worldcover_europe_east")
 os.makedirs(TMPDIR, exist_ok=True)
 
-# Two non-contiguous CORINE-gap regions as (W, S, E, N), small pad each. turkey_levant
-# spans Turkey/Caucasus/Israel; central_asia spans the five -stans. The tile set is the
-# union of both boxes (see module docstring) so the Iran/Iraq gap between them is not
-# downloaded.
+# CORINE-gap regions as (W, S, E, N), small pad each. east spans Ukraine/Belarus/
+# Moldova (UA reaches 22.1 E); turkey_levant spans Turkey/Caucasus/Israel; central_asia
+# spans the five -stans. The tile set is the union of the boxes (see module docstring)
+# so the Iran/Iraq gap between them is not downloaded.
 BOXES = {
+    "east":          (21.0, 44.0, 41.0, 57.0),
     "turkey_levant": (24.0, 29.0, 52.0, 44.0),
     "central_asia":  (46.0, 35.0, 88.0, 56.0),
 }
@@ -119,7 +120,7 @@ def downsampled_dataset(path):
 
 def main():
     tiles = tiles_for_boxes()
-    print(f"{len(tiles)} candidate tiles over the two CORINE-gap boxes")
+    print(f"{len(tiles)} candidate tiles over the CORINE-gap boxes")
     small = []
     for t in tiles:
         url = f"{BASE}/ESA_WorldCover_10m_2021_v200_{t}_Map.tif"
