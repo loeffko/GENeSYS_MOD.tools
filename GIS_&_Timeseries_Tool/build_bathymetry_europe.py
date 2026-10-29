@@ -4,7 +4,7 @@
 runs one ERA5 cutout per tile. Offshore wind needs a depth grid over each tile's sea, so
 this writes ONE bathymetry file per COASTAL tile:
 
-    geodata/bathymetry_europe_{tile}.nc
+    geodata/offshore/bathymetry_europe_{tile}.nc
 
 Each is a GMRT GridServer pull (public, no auth) over the tile's bbox padded by BBOX_PAD,
 saved as z(latitude, longitude) float32 to match bathymetry_us.nc so the notebook's
@@ -30,9 +30,9 @@ from shapely.geometry import box
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
 
-REGIONS = os.path.join(GEODATA, "europe_regions.geojson")
-EEZ = os.path.join(GEODATA, "eez_europe.geojson")
-OUT_TMPL = os.path.join(GEODATA, "bathymetry_europe_{tile}.nc")
+REGIONS = os.path.join(GEODATA, "regions", "europe_regions.geojson")
+EEZ = os.path.join(GEODATA, "offshore", "eez_europe.geojson")
+OUT_TMPL = os.path.join(GEODATA, "offshore", "bathymetry_europe_{tile}.nc")
 
 BBOX_PAD = 0.5     # degrees padded onto each tile's region bbox for the depth grid
 RETRIES = 4

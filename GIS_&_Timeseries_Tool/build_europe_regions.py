@@ -1,6 +1,6 @@
-"""Derive geodata/europe_regions.geojson from the supplied country file.
+"""Derive geodata/regions/europe_regions.geojson from the supplied country file.
 
-The user's geodata/res_countries_europe_mainland.geojson carries both a `region`
+The user's geodata/regions/res_countries_europe_mainland.geojson carries both a `region`
 and an `iso_a2` column, so get_coords/_determine_cutout_bounds would select the
 country/ISO workflow rather than the region-geojson workflow the batch process
 needs. This script produces a clean region-geojson: it drops `iso_a2` (and the
@@ -16,8 +16,8 @@ import os
 import geopandas as gpd
 from shapely.geometry import MultiPolygon
 
-SRC = "geodata/res_countries_europe_mainland.geojson"
-OUT = "geodata/europe_regions.geojson"
+SRC = "geodata/regions/res_countries_europe_mainland.geojson"
+OUT = "geodata/regions/europe_regions.geojson"
 
 # Study-scope keep-list: the codes kept in europe_regions.geojson. This is the full
 # official Europe hub definition, including Israel and the Central-Asian countries

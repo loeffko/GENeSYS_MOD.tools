@@ -340,25 +340,26 @@ def pivot_and_categorize(
 ######################
 
 ## pv capacity factors ##
-def pv_capacity_factors(
-        cutout,
-        coords,
-        solar_panel,
-        tracking=None,
-        bifaciality = 0.,
-        pv_slope=36.7,
-        pv_azimuth=180,
-        altitude_threshold=1.0,
-        delete_vars=0,
-        timeframe=None,
-        filename=None,
-        write_raw_data=False,
-        output_dir='output/',
-        tech_label='pv',
-        optimal_tilt=False,
-        return_categories=False
-):
-    start = timeit.timeit()
+def _optimal_orientation(lat):
+    """Per-cell optimal fixed tilt and equator-facing azimuth, in degrees.
+
+    Closed-form rule of thumb (Landau): tilt as a function of |latitude| for max
+    annual yield; azimuth 180 (south) in the northern hemisphere, 0 in the south.
+    Rough by design, NOT a per-angle yield search; >50 deg extrapolates.
+    """
+    abslat = abs(lat)
+    tilt_deg = xr.where(abslat <= 25, abslat * 0.87, abslat * 0.76 + 3.1)
+    azi_deg = xr.where(lat >= 0, 180.0, 0.0)
+    return tilt_deg, azi_deg
+
+
+def _pv_capacity_factor(ds, solar_panel, pv_slope, pv_azimuth, tracking=None,
+                        bifaciality=0., altitude_threshold=1.0):
+    """PV capacity factor DataArray (time, y, x) for one panel orientation.
+
+    ds is the cutout weather dataset (or a subset of its cells); pv_slope and
+    pv_azimuth are in radians and may be scalars or per-cell DataArrays.
+    """
 
     def pv_angles(sun_alt, sun_azi, pv_slope, pv_azimuth, tracking):
     
@@ -440,26 +441,8 @@ def pv_capacity_factors(
 
         return cosincidence, pv_slope
     
-    sun_alt = cutout.data['solar_altitude']
-    sun_azi = cutout.data['solar_azimuth']
-
-    if optimal_tilt and tracking is None:
-        # Per-cell optimal fixed tilt/azimuth instead of one value for all sites.
-        # Closed-form rule of thumb (Landau), tilt as a function of |latitude| for
-        # max annual yield; azimuth faces the equator (180 deg N hemisphere, 0 deg
-        # S). This is a per-cell (y, x) array that broadcasts through the existing
-        # irradiance math at no extra cost - NOT a per-angle yield search (which
-        # would be far heavier). Rough by design; good enough for siting.
-        lat = cutout.data.y
-        abslat = abs(lat)
-        tilt_deg = xr.where(abslat <= 25, abslat * 0.87,
-                            abslat * 0.76 + 3.1)   # >50 deg extrapolates; rough
-        azi_deg = xr.where(lat >= 0, 180.0, 0.0)
-        pv_slope = deg2rad(tilt_deg)
-        pv_azimuth = deg2rad(azi_deg)
-    else:
-        pv_slope = deg2rad(pv_slope)
-        pv_azimuth = deg2rad(pv_azimuth)
+    sun_alt = ds['solar_altitude']
+    sun_azi = ds['solar_azimuth']
 
     cosincidence, pv_slope = pv_angles(sun_alt, sun_azi, pv_slope, pv_azimuth, tracking)
 
@@ -477,16 +460,16 @@ def pv_capacity_factors(
         
         return total_t
 
-    influx_toa = cutout.data['influx_toa']
-    influx_direct = cutout.data['influx_direct']
-    influx_diffuse = cutout.data['influx_diffuse']
+    influx_toa = ds['influx_toa']
+    influx_direct = ds['influx_direct']
+    influx_diffuse = ds['influx_diffuse']
     
     def clip(influx, influx_max):
         return influx.clip(min=0, max=influx_max.transpose(*influx.dims).data)
 
     direct = clip(influx_direct, influx_toa)
     diffuse = clip(influx_diffuse, influx_toa - influx_direct)
-    albedo = cutout.data['albedo']
+    albedo = ds['albedo']
     
     total_t = irradiance(direct, diffuse, albedo, cosincidence, pv_slope, sun_alt)
 
@@ -542,7 +525,44 @@ def pv_capacity_factors(
 
         return da
 
-    pv_panel = _power_huld(total_t, cutout.data['temperature'], pc)
+    pv_panel = _power_huld(total_t, ds['temperature'], pc)
+
+    return pv_panel
+
+
+def pv_capacity_factors(
+        cutout,
+        coords,
+        solar_panel,
+        tracking=None,
+        bifaciality = 0.,
+        pv_slope=36.7,
+        pv_azimuth=180,
+        altitude_threshold=1.0,
+        delete_vars=0,
+        timeframe=None,
+        filename=None,
+        write_raw_data=False,
+        output_dir='output/',
+        tech_label='pv',
+        optimal_tilt=False,
+        return_categories=False
+):
+    start = timeit.timeit()
+
+    if optimal_tilt and tracking is None:
+        # Per-cell optimal fixed tilt/azimuth instead of one value for all sites
+        # (a (y, x) array that broadcasts through the irradiance math at no cost).
+        tilt_deg, azi_deg = _optimal_orientation(cutout.data.y)
+        pv_slope = deg2rad(tilt_deg)
+        pv_azimuth = deg2rad(azi_deg)
+    else:
+        pv_slope = deg2rad(pv_slope)
+        pv_azimuth = deg2rad(pv_azimuth)
+
+    pv_panel = _pv_capacity_factor(cutout.data, solar_panel, pv_slope, pv_azimuth,
+                                   tracking=tracking, bifaciality=bifaciality,
+                                   altitude_threshold=altitude_threshold)
 
     pv_df = pv_panel.to_dataframe().reset_index()
 
@@ -575,6 +595,95 @@ def pv_capacity_factors(
     end = timeit.timeit()
     return print(end - start)
 
+
+# Rooftop PV segments: {segment: [orientation, ...]}. A segment's CF is the
+# weight-averaged CF of its orientations. Orientations are equator-relative so the
+# same spec works in either hemisphere:
+#   tilt    : degrees, or "optimal" (per-cell latitude rule, see _optimal_orientation)
+#   azimuth : "equator" (per cell), "pole", "east", "west", or degrees clockwise
+#             from north (90 = east, 180 = south, 270 = west)
+#   weight  : relative share of that orientation within the segment
+# Residential roofs face whichever way the house does; commercial roofs are mostly
+# flat, so racks can face the equator at the optimal tilt.
+ROOFTOP_SEGMENTS = {
+    "residential": [
+        {"tilt": 20, "azimuth": "equator", "weight": 0.5},
+        {"tilt": 20, "azimuth": "east", "weight": 0.25},
+        {"tilt": 20, "azimuth": "west", "weight": 0.25},
+    ],
+    "commercial": [
+        {"tilt": "optimal", "azimuth": "equator", "weight": 1.0},
+    ],
+}
+
+_NAMED_AZIMUTHS = {"east": 90.0, "west": 270.0}
+
+
+def _orientation_deg(orientation, lat):
+    """(tilt, azimuth) in degrees for one rooftop orientation spec; scalars or
+    per-cell DataArrays when they depend on latitude."""
+    opt_tilt, eq_azi = _optimal_orientation(lat)
+    tilt = orientation["tilt"]
+    azi = orientation["azimuth"]
+    tilt_deg = opt_tilt if tilt == "optimal" else float(tilt)
+    if azi == "equator":
+        azi_deg = eq_azi
+    elif azi == "pole":
+        azi_deg = (eq_azi + 180.0) % 360.0
+    elif azi in _NAMED_AZIMUTHS:
+        azi_deg = _NAMED_AZIMUTHS[azi]
+    else:
+        azi_deg = float(azi)
+    return tilt_deg, azi_deg
+
+
+def pv_rooftop_capacity_factors(cutout, coords, solar_panel, segments=None,
+                                timeframe=None, filename=None, output_dir='output/',
+                                area_crs=None):
+    """Rooftop PV capacity factors: one (time x region) series per rooftop segment.
+
+    coords are the rooftop cells (e.g. coords_rooftop_usable); each cell is
+    weighted by its rooftop area (cell area x 'availability', the built-up share,
+    when that column is present), so the regional series follow where the roofs
+    are. No inf/avg/opt split: each segment maps to one model technology.
+    Writes {output_dir}/{timeframe}_{filename}_pv_rooftop_{segment}.csv and
+    returns {segment: DataFrame}.
+    """
+    segments = segments or ROOFTOP_SEGMENTS
+    if coords is None or coords.empty:
+        return {seg: pd.DataFrame() for seg in segments}
+
+    # only the rooftop cells' rows/columns of the weather data -> far less compute
+    ds = cutout.data
+    ds = ds.isel(x=np.flatnonzero(np.isin(ds.x.values, coords["x"].unique())),
+                 y=np.flatnonzero(np.isin(ds.y.values, coords["y"].unique())))
+
+    area = (cutout.grid.set_index(["y", "x"])
+            .to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6).rename("area_km2")
+    cols = ["x", "y", "region"] + (["availability"] if "availability" in coords else [])
+    w = coords[cols].merge(area.reset_index(), on=["y", "x"], how="left")
+    w["w"] = w["area_km2"] * (w["availability"] if "availability" in w else 1.0)
+
+    os.makedirs(output_dir, exist_ok=True)
+    out = {}
+    for seg, orientations in segments.items():
+        cf, wsum = None, 0.0
+        for o in orientations:
+            tilt_deg, azi_deg = _orientation_deg(o, ds.y)
+            part = _pv_capacity_factor(ds, solar_panel, deg2rad(tilt_deg), deg2rad(azi_deg))
+            wt = float(o.get("weight", 1.0))
+            cf = part * wt if cf is None else cf + part * wt
+            wsum += wt
+        cf = (cf / wsum).rename("capacity_factor")
+
+        df = cf.to_dataframe().reset_index()[["time", "y", "x", "capacity_factor"]]
+        df = df.merge(w[["x", "y", "region", "w"]], on=["x", "y"])
+        df["wcf"] = df["capacity_factor"] * df["w"]
+        agg = df.groupby(["time", "region"])[["wcf", "w"]].sum()
+        series = (agg["wcf"] / agg["w"]).unstack("region").round(4)
+        series.to_csv(os.path.join(output_dir, f"{timeframe}_{filename}_pv_rooftop_{seg}.csv"))
+        out[seg] = series
+    return out
 
 
 ## wind onshore cpacity factors ##
@@ -823,7 +932,7 @@ def plot_country_map(cutout, zoom=False, size=8, zoom_factor_x=5, zoom_factor_y=
 def get_country_geometry(regions, natural_earth_dataset="admin_0_map_units"):
 
     # Import country mapping from alpha-2 to full name
-    country_mapping = pd.read_csv("geodata/iso_codes_all.csv", usecols=["name", "alpha-2"], index_col=0, encoding="latin").squeeze("columns").to_dict()
+    country_mapping = pd.read_csv("geodata/config/iso_codes_all.csv", usecols=["name", "alpha-2"], index_col=0, encoding="latin").squeeze("columns").to_dict()
 
     # Rename regions list
     regions_name_en = [country_mapping.get(code, 'Unknown') for code in regions]
@@ -1080,7 +1189,7 @@ def gis_get_country_geometry(regions=None,admin=None,cutout=None):
     if admin == 0:
 
         shapefile = get_country_geometry(regions=regions)
-        country_mapping = pd.read_csv("geodata/iso_codes_all.csv", usecols=["name", "alpha-2"], index_col=0, encoding="latin").squeeze("columns").to_dict()
+        country_mapping = pd.read_csv("geodata/config/iso_codes_all.csv", usecols=["name", "alpha-2"], index_col=0, encoding="latin").squeeze("columns").to_dict()
         regions_name_en = [country_mapping.get(code, 'Unknown') for code in regions]
 
         shapes = shapefile[shapefile.index.isin(regions_name_en)]
@@ -1088,10 +1197,10 @@ def gis_get_country_geometry(regions=None,admin=None,cutout=None):
     elif admin == 1:
         #admin 1
 
-        admin1_geodata = "geodata/natural_earth_world_admin1.geojson"
+        admin1_geodata = "geodata/regions/natural_earth_world_admin1.geojson"
         shapefile_admin1_geodata = gpd.read_file(admin1_geodata)   
 
-        country_mapping = pd.read_csv("geodata/iso_codes_all.csv", usecols=["name", "alpha-2"], index_col=0, encoding="latin").squeeze("columns").to_dict()
+        country_mapping = pd.read_csv("geodata/config/iso_codes_all.csv", usecols=["name", "alpha-2"], index_col=0, encoding="latin").squeeze("columns").to_dict()
         regions_name_en = [country_mapping.get(code, 'Unknown') for code in regions] 
         
         # Use natural earth data for region polygon selection
@@ -1230,7 +1339,11 @@ def equal_area_crs(shapes):
             "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
 
 
-def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMatrix=None,AvailabilityMatrix_Rooftop=None,AvailabilityMatrix_Wind=None,pv_cap_per_sqkm=100,pv_percent_land_available=0.03,wind_cap_per_sqkm=27,wind_percent_land_available=0.03,rooftop_cap_per_sqkm=100,rooftop_percent_area_available=0.2,area_crs=None):
+def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMatrix=None,AvailabilityMatrix_Rooftop=None,AvailabilityMatrix_Wind=None,pv_cap_per_sqkm=100,pv_percent_land_available=0.03,wind_cap_per_sqkm=27,wind_percent_land_available=0.03,rooftop_cap_per_sqkm=100,rooftop_percent_area_available=0.2,area_crs=None,rooftop_shares=None):
+    # rooftop_shares: optional split of the rooftop potential into 'Rooftop Capacity
+    # {segment} [GW]' columns, matching the segments of pv_rooftop_capacity_factors.
+    # Either one {segment: share} for all regions, or {region: {segment: share}}
+    # (see load_rooftop_shares). Shares sum to 1 per region.
     area = cutout.grid.set_index(["y", "x"]).to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6
     area.name = "Area [km²]"
     # The availability matrix is indexed by (shape, y, x); collapse to one value per
@@ -1262,7 +1375,68 @@ def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMa
 
     output_df = merged_df.groupby("region")[["Area [km²]","Suitable Area PV [km²]","Suitable Area Wind [km²]","Suitable Area Rooftops [km²]","PV Capacity [GW]","Rooftop Capacity [GW]","Wind Capacity [GW]"]].sum().reset_index()
 
+    if rooftop_shares:
+        if all(isinstance(v, dict) for v in rooftop_shares.values()):
+            table = rooftop_shares
+        else:
+            table = {r: rooftop_shares for r in output_df["region"]}
+        missing = sorted(set(output_df["region"]) - set(table))
+        if missing:
+            raise ValueError(f"rooftop_shares has no entry for regions {missing}")
+        for r in output_df["region"]:
+            if abs(sum(table[r].values()) - 1.0) > 1e-6:
+                raise ValueError(f"rooftop_shares for {r} must sum to 1, got {table[r]}")
+        segments = dict.fromkeys(s for r in output_df["region"] for s in table[r])
+        for seg in segments:
+            share = output_df["region"].map(lambda r: table[r].get(seg, 0.0))
+            output_df[f"Rooftop Capacity {seg} [GW]"] = output_df["Rooftop Capacity [GW]"] * share
+
     return output_df
+
+
+ROOFTOP_SHARES_FILE = "geodata/config/rooftop_shares.csv"
+
+
+def load_rooftop_shares(regions=None, geo_file=None, country=None, country_col=None,
+                        shares_file=ROOFTOP_SHARES_FILE):
+    """Per-region rooftop segment shares {region: {"residential": r, "commercial": c}}
+    from the per-country table built by build_rooftop_shares.py, for the
+    `rooftop_shares` argument of the potentials functions.
+
+    Which country each region belongs to:
+    - regions as a {region: country code} dict: used as given;
+    - country="US": every region gets that one country (sub-national region files);
+    - country_col="country_iso3": read from that column of geo_file;
+    - otherwise the region codes themselves are the country codes (ISO2/ISO3).
+    regions=None or [] means every region in geo_file. Country codes may be ISO2 or
+    ISO3. An unknown country is an error rather than a silent default.
+    """
+    if isinstance(regions, dict):
+        mapping = dict(regions)
+    else:
+        if not regions:
+            if geo_file is None:
+                raise ValueError("pass regions or geo_file")
+            regions = gpd.read_file(geo_file, ignore_geometry=True)["region"].tolist()
+        if country is not None:
+            mapping = {r: country for r in regions}
+        elif country_col is not None:
+            g = gpd.read_file(geo_file, ignore_geometry=True)
+            lookup = dict(zip(g["region"], g[country_col]))
+            mapping = {r: lookup[r] for r in regions}
+        else:
+            mapping = {r: r for r in regions}
+
+    table = pd.read_csv(shares_file, keep_default_na=False)
+    by_code = {}
+    for _, row in table.iterrows():
+        shares = {"residential": float(row["residential"]), "commercial": float(row["commercial"])}
+        by_code[row["iso2"]] = by_code[row["iso3"]] = shares
+    unknown = sorted({str(c) for c in mapping.values() if c not in by_code})
+    if unknown:
+        raise ValueError(f"no rooftop shares for countries {unknown} in {shares_file} "
+                         f"(add them to build_rooftop_shares.py and re-run)")
+    return {r: by_code[c] for r, c in mapping.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -1549,7 +1723,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     color=None, matrix_cache=None,
                                     add_category=True, pv_solar_panel=None, wind_turbine=None,
                                     pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
-                                    rooftop_pv_slope=25, rooftop_pv_azimuth=180):
+                                    rooftop_shares=None):
     """Memory-safe per-region GIS potentials with a stitched availability map.
 
     Processes one region at a time so atlite only ever rasterizes the land-cover
@@ -1571,8 +1745,8 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
     - coords_onshore_usable  : onshore land coords (all regions) with availability
                                >= usable_threshold, for the PV / onshore-wind CF
                                timeseries.
-    - coords_rooftop_usable  : coords with rooftop (developed) area, for a separate
-                               rooftop-PV CF timeseries.
+    - coords_rooftop_usable  : coords with rooftop (developed) area and its
+                               'availability' share, for pv_rooftop_capacity_factors.
     - coords_offshore_usable : buildable offshore coords (depth-classed) if
                                coords_offshore was passed, else None.
     """
@@ -1631,7 +1805,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                 pv_cap_per_sqkm=pv_cap_per_sqkm, pv_percent_land_available=pv_percent_land_available,
                 wind_cap_per_sqkm=wind_cap_per_sqkm, wind_percent_land_available=wind_percent_land_available,
                 rooftop_cap_per_sqkm=rooftop_cap_per_sqkm, rooftop_percent_area_available=rooftop_percent_area_available,
-                area_crs=area_crs)
+                area_crs=area_crs, rooftop_shares=rooftop_shares)
             region_df.to_csv(os.path.join(output_dir, f"{filename}_potentials_{name}.csv"), index=False)
             per_region_tables.append(region_df)
 
@@ -1723,9 +1897,10 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                              if usable_rooftop_parts else coords_onshore.iloc[0:0].copy())
 
     # Attach a site-quality 'category' (inf/avg/opt) per cell so the usable-coords
-    # CSVs carry it for later plotting/analysis. PV land + rooftop use the PV
-    # capacity factor; wind land uses the onshore-wind capacity factor. Same q30/q70
-    # split as the timeseries. CF outputs go to a temp dir so no extra files written.
+    # CSVs carry it for later plotting/analysis. PV land uses the PV capacity factor;
+    # wind land uses the onshore-wind capacity factor. Same q30/q70 split as the
+    # timeseries. Rooftop has no such split (one tech per rooftop segment). CF
+    # outputs go to a temp dir so no extra files are written.
     if add_category and pv_solar_panel is not None and len(coords_onshore_usable):
         import tempfile
         _tmp = tempfile.mkdtemp()
@@ -1736,14 +1911,6 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             return_categories=True)
         coords_onshore_usable = coords_onshore_usable.merge(
             _on_cat[["coords", "category"]], on="coords", how="left")
-        if len(coords_rooftop_usable):
-            *_drop, _rf_cat = pv_capacity_factors(
-                cutout, coords_rooftop_usable, pv_solar_panel,
-                pv_slope=rooftop_pv_slope, pv_azimuth=rooftop_pv_azimuth,
-                timeframe="catcalc", filename="_catcalc", output_dir=_tmp,
-                tech_label="pv_rooftop", return_categories=True)
-            coords_rooftop_usable = coords_rooftop_usable.merge(
-                _rf_cat[["coords", "category"]], on="coords", how="left")
     if add_category and wind_turbine is not None and len(coords_wind_usable):
         import tempfile
         _tmpw = tempfile.mkdtemp()
@@ -1755,8 +1922,8 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             _wd_cat[["coords", "category"]], on="coords", how="left")
 
     # Split PV and onshore-wind potential into inf/avg/opt categories (q30/q70 site
-    # quality) and append as columns on the combined per-region table. Rooftop stays
-    # a single column (already in `combined`). Reuses the categories computed above.
+    # quality) and append as columns on the combined per-region table. Rooftop is
+    # split by segment share instead (rooftop_shares, already in `combined`).
     if not combined.empty and "category" in coords_onshore_usable.columns:
         _pv_split = _split_capacity_by_category(
             coords_onshore_usable, cutout, pv_cap_per_sqkm, pv_percent_land_available,
@@ -1810,7 +1977,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                       solar_panel=None, onshore_turbine='Vestas_V112_3MW',
                       offshore_turbine='Vestas_V112_3MW',
                       pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
-                      rooftop_pv_slope=25, rooftop_pv_azimuth=180,
+                      rooftop_segments=None, rooftop_shares=None,
                       excluder=None, cities=None, wind_excluder=None,
                       tile_layers=None,
                       pv_cap_per_sqkm=100, pv_percent_land_available=0.03,
@@ -1879,6 +2046,11 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                                  this tile's potentials.
     Per-tile excluders are built lazily inside the loop and freed with the cutout.
 
+    Rooftop PV: when potentials run, each tile's rooftop cells also get one CF
+    series per `rooftop_segments` entry (default ROOFTOP_SEGMENTS), combined as
+    family 'pv_rooftop_{segment}'; `rooftop_shares` splits the rooftop potential
+    (one {segment: share}, or per region via load_rooftop_shares).
+
     Returns a dict:
       - "cf"                  : {family: combined (time x all-regions) DataFrame}
       - "potentials_combined" : one row per region (all tiles concatenated)
@@ -1925,6 +2097,10 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         if frame is not None and not frame.empty:
             cf_parts.setdefault(family, []).append(frame)
 
+    fam_files = dict(_CF_FAMILY_FILES)
+    for seg in (rooftop_segments or ROOFTOP_SEGMENTS):
+        fam_files[f"pv_rooftop_{seg}"] = ("pv_rooftop", seg)
+
     for tile, codes in tiles.items():
         tile_codes = [c for c in codes if c in available]
         if not tile_codes:
@@ -1940,7 +2116,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         if skip_if_combined_exists and os.path.exists(pot_csv):
             print(f"Tile '{tile}': per-tile outputs exist, reading back and skipping build.")
             potentials_parts.append(pd.read_csv(pot_csv))
-            for fam, (tech, cat) in _CF_FAMILY_FILES.items():
+            for fam, (tech, cat) in fam_files.items():
                 p = os.path.join(output_dir, f"{timeframe}_{tile_filename}_{tech}_{cat}.csv")
                 if os.path.exists(p):
                     _accum(fam, pd.read_csv(p, index_col=0))
@@ -2074,9 +2250,16 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                 area_crs=tile_area_crs, output_dir=output_dir, filename=tile_filename,
                 pv_solar_panel=solar_panel, wind_turbine=onshore_turbine,
                 pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
-                rooftop_pv_slope=rooftop_pv_slope, rooftop_pv_azimuth=rooftop_pv_azimuth,
+                rooftop_shares=rooftop_shares,
                 plot=plot, verbose=verbose, color=color)
             potentials_parts.append(combined_df)
+            if run_pv and solar_panel is not None and not _crf_u.empty:
+                roof_cf = pv_rooftop_capacity_factors(
+                    cutout, _crf_u, solar_panel, segments=rooftop_segments,
+                    timeframe=timeframe, filename=tile_filename, output_dir=output_dir,
+                    area_crs=tile_area_crs)
+                for seg, series in roof_cf.items():
+                    _accum(f"pv_rooftop_{seg}", series)
             maps.append((tile, stitch_land, stitch_roof,
                          (minx - bbox_buffer, miny - bbox_buffer,
                           maxx + bbox_buffer, maxy + bbox_buffer)))
@@ -2118,8 +2301,8 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         combined = pd.concat(parts, axis=1)
         combined = combined.loc[:, ~combined.columns.duplicated()]
         cf_combined[fam] = combined
-        if fam in _CF_FAMILY_FILES:
-            tech, cat = _CF_FAMILY_FILES[fam]
+        if fam in fam_files:
+            tech, cat = fam_files[fam]
             combined.to_csv(os.path.join(output_dir, f"{timeframe}_{filename}_{tech}_{cat}.csv"))
         else:  # temperature families: {timeframe}_{fam}_{filename}.csv
             combined.to_csv(os.path.join(output_dir, f"{timeframe}_{fam}_{filename}.csv"))

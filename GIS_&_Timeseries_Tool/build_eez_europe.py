@@ -1,10 +1,10 @@
 """Extract a Europe-hub EEZ polygon layer for the RES tool offshore workflow.
 
 Pulls the coastal hub countries out of the bundled global Marine Regions EEZ v12
-(`geodata/eez_v12.gpkg`) by their sovereign ISO3 (`ISO_SOV1`) and writes one merged
+(`geodata/offshore/eez_v12.gpkg`) by their sovereign ISO3 (`ISO_SOV1`) and writes one merged
 polygon file in EPSG:4326:
 
-    geodata/eez_europe.geojson
+    geodata/offshore/eez_europe.geojson
 
 `run_batch_by_tile` uses this as the single global `offshore_file`; `_get_coords_custom`
 clips it to each tile's cutout bbox, so one Europe-wide file is cheap per tile (no need
@@ -27,8 +27,8 @@ from shapely.geometry import box
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-SRC = os.path.join(GEODATA, "eez_v12.gpkg")
-OUT = os.path.join(GEODATA, "eez_europe.geojson")
+SRC = os.path.join(GEODATA, "offshore", "eez_v12.gpkg")
+OUT = os.path.join(GEODATA, "offshore", "eez_europe.geojson")
 
 # Europe-hub bbox (lon/lat). Several hub sovereigns (FR, GB, NL, ES, PT, NO) hold far-flung
 # overseas EEZ - French Polynesia, the Falklands, the Caribbean, Reunion, Antarctic claims,

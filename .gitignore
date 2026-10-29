@@ -1,9 +1,15 @@
-GIS_&_Timeseries_Tool/geodata/corine.tif
 iamc_conversion/genesysmod_to_iamc/__pycache__/
 iamc_conversion/.ipynb_checkpoints/
 iamc_conversion/genesysmod_to_iamc/out/
 iamc_conversion/genesysmod_to_iamc/input/
-GIS_&_Timeseries_Tool/geodata/
+# geodata: big input layers (land cover, protected areas, offshore) and download caches
+# stay local; small config tables, region polygons and the Germany example are tracked.
+GIS_&_Timeseries_Tool/geodata/*
+!GIS_&_Timeseries_Tool/geodata/config/
+!GIS_&_Timeseries_Tool/geodata/regions/
+!GIS_&_Timeseries_Tool/geodata/example/
+# unused US state shapefile (15 MB, public TIGER/Line download)
+GIS_&_Timeseries_Tool/geodata/regions/tl_2022_us_state.*
 GIS_&_Timeseries_Tool/output
 GIS_&_Timeseries_Tool/__pycache__
 GIS_&_Timeseries_Tool/cutouts

@@ -1,6 +1,6 @@
 """Build a merged, strict-tier WDPA protected-areas layer for the APAC hub RES run.
 
-    geodata/wdpa_apac.gpkg
+    geodata/exclusions/wdpa_apac.gpkg
 
 Protected Planet's cloudfront bucket changed since the India/Europe builders
 were written, in two ways (both checked live against the Oct2026 release):
@@ -44,11 +44,11 @@ from shapely.geometry import box
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-TMPDIR = os.path.join(GEODATA, "_wdpa_apac_tmp")
+TMPDIR = os.path.join(GEODATA, "_cache", "wdpa_apac")
 os.makedirs(TMPDIR, exist_ok=True)
-OUT = os.path.join(GEODATA, "wdpa_apac.gpkg")
+OUT = os.path.join(GEODATA, "exclusions", "wdpa_apac.gpkg")
 LAYER = "wdpa"
-REGIONS = os.path.join(GEODATA, "fel_APAC_regions.geojson")
+REGIONS = os.path.join(GEODATA, "regions", "fel_APAC_regions.geojson")
 
 BUCKET = "https://d1gam3xoknrgr2.cloudfront.net/"
 STRICT_IUCN = ("Ia", "Ib", "II")          # strict-protection tier kept at build time

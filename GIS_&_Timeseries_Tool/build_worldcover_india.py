@@ -4,7 +4,7 @@ Downloads the ESA WorldCover 2021 v200 tiles that intersect the India region
 bounding box (public AWS S3, no auth), downsamples each to ~300 m by
 class-preserving mode resampling, and merges them into a single EPSG:4326 GeoTIFF:
 
-    geodata/worldcover_india_300m.tif
+    geodata/landcover/worldcover_india_300m.tif
 
 The India geometry (fel_india_regions.geojson) spans ~68-97 E x 6-36 N, i.e. up to
 ~11 x 11 = ~120 candidate 3-deg tiles. At 10 m that is several GB of downloads and a
@@ -29,8 +29,8 @@ from rasterio.io import MemoryFile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-OUT = os.path.join(GEODATA, "worldcover_india_300m.tif")
-TMPDIR = os.path.join(GEODATA, "_worldcover_india_tmp")
+OUT = os.path.join(GEODATA, "landcover", "worldcover_india_300m.tif")
+TMPDIR = os.path.join(GEODATA, "_cache", "worldcover_india")
 os.makedirs(TMPDIR, exist_ok=True)
 
 # India region bbox (from fel_india_regions.geojson total_bounds, small pad). Covers

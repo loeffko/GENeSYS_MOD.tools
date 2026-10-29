@@ -13,11 +13,20 @@ region-specific paths/parameters and call those functions.
 - `functions.py` — all functions (~1500 lines). Edit here, not in the notebooks.
 - `GENeSYS-MOD_RES_Tool_example.ipynb` — small, self-contained Germany example for git (tiny cutout, no large exclusion layers). The shareable reference.
 - `GENeSYS-MOD_RES_Tool_US.ipynb`, `..._CA.ipynb`, `..._DE.ipynb` — full regional setups. Large; depend on big local `geodata/` layers, NOT pushed to git.
-- `geodata/` — input layers (region polygons, land cover, protected areas, EEZ, bathymetry). Big rasters/GDBs live here; keep it to files the notebooks reference.
+- `geodata/` — input layers, one subfolder per kind (paths in code are `geodata/<sub>/<file>`):
+  - `config/` — small tables (`rooftop_shares.csv`, `iso_codes_all.csv`). **Tracked.**
+  - `regions/` — region polygons (`europe_regions`, `fel_APAC_regions`, `fel_india_*`, `iso_regions*`, natural-earth admin-1). **Tracked** (except the unused `tl_2022_us_state.*`).
+  - `example/` — the small Germany example set (polygon, EEZ, bathymetry). **Tracked.**
+  - `landcover/` — WorldCover / CORINE / NALCMS / LCNext rasters. Local only.
+  - `exclusions/` — WDPA, PAD-US, CPCAD, US ordinance layers. Local only.
+  - `offshore/` — EEZ polygons, bathymetry grids, offshore no-build masks. Local only.
+  - `_cache/` — raw downloads the `build_*.py` scripts reuse (WorldCover tiles, WDPA packs, GHSL). Local only.
+  The root `.gitignore` ignores `geodata/*` and re-includes `config/`, `regions/`, `example/`. A new layer goes in the matching subfolder; a new build script writes there and caches raw downloads under `_cache/<name>/`.
+- `sources/data_sources.csv` — provenance for every externally sourced input (provider, version, URL, licence, local path, build script). Add a row when you bring in a new dataset; `TO CONFIRM` marks fields not yet known.
 - `cutouts/` — atlite ERA5 cutouts (`.nc`) + `era5_cache/` (raw CDS download cache). Large, git-ignored.
 - `solarpanel/` — PV module configs (`CSi.yaml`, `CdTe.yaml`, `KANENA.yaml`).
 - `windturbines/` — turbine power-curve configs (referenced by `onshore_turbine`/`offshore_turbine`).
-- `output/` — generated CSVs + figures.
+- `output/` — generated CSVs + figures, one subfolder per timeframe. Git-ignored.
 
 ## Core design principle: region-agnostic functions
 
@@ -67,8 +76,42 @@ PowerShell). Smaller cutouts also avoid it. See the auto-memory note
 - `plot_offshore_map`, `equal_area_crs`.
 
 `pv_capacity_factors(..., tech_label=, optimal_tilt=)`: `tech_label` renames output
-files (e.g. `pv_rooftop`) without changing the opt/avg/inf split; `optimal_tilt=True`
-uses a cheap per-cell latitude rule for tilt (not a per-angle yield search).
+files without changing the opt/avg/inf split; `optimal_tilt=True` uses a cheap
+per-cell latitude rule for tilt (`_optimal_orientation`, not a per-angle yield
+search). The PV physics lives in `_pv_capacity_factor(ds, panel, slope, azimuth)`
+(radians, scalar or per-cell), shared by the utility and rooftop paths.
+
+**Rooftop PV = segments, not inf/avg/opt.** GENeSYS-MOD has `P_PV_Rooftop_Residential`
+and `P_PV_Rooftop_Commercial`, so rooftop is split by segment:
+- `pv_rooftop_capacity_factors(cutout, coords_rooftop_usable, panel, segments=)` writes
+  one series per segment (`..._pv_rooftop_{segment}.csv`), each a weighted mix of
+  orientations, averaged over a region's rooftop cells weighted by rooftop area (cell
+  area × built-up share). Orientations are equator-relative so one spec works in both
+  hemispheres: `tilt` = degrees or `"optimal"`, `azimuth` = `"equator"`/`"pole"`/
+  `"east"`/`"west"` or degrees clockwise from north (atlite's solar azimuth convention:
+  90 = east, 180 = south). Default `ROOFTOP_SEGMENTS`: residential 50% equator-facing +
+  25% east + 25% west at 20°; commercial (flat roofs, racks) optimal tilt facing the equator.
+- `rooftop_shares` on `calculate_capacity_potentials` / `calculate_potentials_per_region` /
+  `run_batch_by_tile` adds `Rooftop Capacity {segment} [GW]` columns. Either one
+  `{segment: share}` for all regions or `{region: {segment: share}}`; each sums to 1, and a
+  region with no entry is an error. Notebooks build it with `load_rooftop_shares(...)` from
+  the per-country table `geodata/config/rooftop_shares.csv` (WorldCover can't tell residential
+  from commercial, so it's a country share, not per cell). The region-to-country mapping
+  is a notebook argument: region codes are ISO2 (EU/APAC/DE/SG, the default),
+  `country="US"` for a sub-national file, or `country_col="country_iso3"` (India). ISO2
+  or ISO3 both match.
+- `build_rooftop_shares.py` makes that CSV from GHSL `GHS_BUILT_S` / `GHS_BUILT_S_NRES`
+  R2023A E2020 at 1 km (~186 MB, JRC FTP, no auth, cached in `geodata/_cache/ghsl/`). Each
+  country is measured over the project's own region polygons (listed in `SOURCES`; add a
+  region file there for a new country). commercial = non-residential footprint share ×
+  1.5 usable-roof factor, calibrated so the EU-27 total matches JRC's 2025 building-stock
+  split of 22% non-residential rooftop capacity (GHSL footprint alone gives 16%). The raw
+  share is kept in `commercial_footprint`. GHSL under-detects non-residential buildings in
+  dense mixed fabric: India comes out at ~3% and Bangladesh at ~2%, and every country
+  below 5% is flagged in `note`. Put better national figures in `OVERRIDES` and re-run.
+- `run_batch_by_tile` emits rooftop families `pv_rooftop_{segment}` alongside the others.
+- In 2018 India results, commercial ≈ utility PV and residential is 3–7% lower; the hourly
+  shape barely changes (east/west at a 20° pitch only widens the shoulders slightly).
 
 ## Adding a new region
 
@@ -131,10 +174,10 @@ Mechanics worth knowing:
 
 Both are scriptable from data already in `geodata/` or a no-auth web service — no manual portal download needed. India (`eez_india.geojson` + `bathymetry_india.nc`) and the Europe/APAC hubs (`build_eez_*.py`, `build_bathymetry_*.py`) were built this way:
 
-- **EEZ**: extract the country's polygons from the bundled global Marine Regions EEZ v12 (`geodata/eez_v12.gpkg`), filtering on `ISO_SOV1` (the sovereign ISO3, e.g. `'IND'`). Keep only `GEONAME`→`name` + `geometry` in EPSG:4326 to match `eez_us.geojson`. The reader only uses `geometry`; the `name` column is convention. `ISO_SOV1` catches all of a country's zones (mainland + far offshore banks/islands).
+- **EEZ**: extract the country's polygons from the bundled global Marine Regions EEZ v12 (`geodata/offshore/eez_v12.gpkg`), filtering on `ISO_SOV1` (the sovereign ISO3, e.g. `'IND'`). Keep only `GEONAME`→`name` + `geometry` in EPSG:4326 to match `eez_us.geojson`. The reader only uses `geometry`; the `name` column is convention. `ISO_SOV1` catches all of a country's zones (mainland + far offshore banks/islands).
   ```python
-  g = gpd.read_file("geodata/eez_v12.gpkg", where="ISO_SOV1='IND'")
-  g[["GEONAME","geometry"]].rename(columns={"GEONAME":"name"}).to_file("geodata/eez_<region>.geojson", driver="GeoJSON")
+  g = gpd.read_file("geodata/offshore/eez_v12.gpkg", where="ISO_SOV1='IND'")
+  g[["GEONAME","geometry"]].rename(columns={"GEONAME":"name"}).to_file("geodata/offshore/eez_<region>.geojson", driver="GeoJSON")
   ```
   **Multi-sovereign hub + overseas-territory bbox clip**: for a hub of several sovereigns (`build_eez_europe.py`, `build_eez_apac.py`), `ISO_SOV1 IN (...)` also pulls in each sovereign's far-flung overseas EEZ (French Polynesia for France, Cook Islands/Niue/Tokelau for New Zealand, Heard/McDonald/Norfolk/Cocos/Christmas Island for Australia) — these share the sovereign's ISO3 but sit nowhere near the hub, pulling the raw query's bbox out to the full ±180°. Clip to a hub bbox (intersect + `geometry.intersection(box(*hub_bbox))`) to drop them.
   **Simplify a hub-wide EEZ before writing it.** An archipelagic country's EEZ can be one multipolygon with hundreds of thousands of vertices (Indonesia's is ~368k) — large enough that GDAL's GeoJSON reader refuses it outright (`"GeoJSON object too complex/large"`) on a plain `gpd.read_file`, which breaks not just the build script but every runtime read in `functions.py` (`get_coords`/`_get_coords_custom`, `plot_offshore_map`). Call `.simplify(tol, preserve_topology=True)` (e.g. `tol=0.001`° ≈ 100 m) after the bbox clip — far finer than the ~30 km cutout / depth-classification scale this feeds, so no real precision is lost, and it keeps the file readable everywhere with no `OGR_GEOJSON_MAX_OBJ_SIZE` env-var workaround needed.

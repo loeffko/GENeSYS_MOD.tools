@@ -51,7 +51,8 @@ Effect of stacking exclusion filters on the onshore wind potential (US example: 
 | [functions.py](functions.py) | All logic. Edit here, not in the notebooks. |
 | [GENeSYS-MOD_RES_Tool.ipynb](GENeSYS-MOD_RES_Tool.ipynb) | Reference notebook (small Germany example run). Start here. |
 | `GENeSYS-MOD_RES_Tool_DE.ipynb` / `_CA.ipynb` / `_US.ipynb` | Full regional setups (Germany, Canada, US). Depend on large local `geodata/` layers that are **not** in git. |
-| `geodata/` | Input layers: region polygons, land cover, protected areas, EEZ, bathymetry. Large files are git-ignored; small examples (Germany geojson/EEZ/bathymetry) are included. |
+| `geodata/` | Input layers, by kind: `config/` (small tables, e.g. rooftop shares), `regions/` (region polygons), `example/` (Germany example set), `landcover/`, `exclusions/` (protected areas, ordinances), `offshore/` (EEZ, bathymetry), `_cache/` (raw downloads). Only `config/`, `regions/` and `example/` are in git. |
+| [sources/data_sources.csv](sources/data_sources.csv) | Provenance of every externally sourced dataset: provider, version, URL, licence, local path, build script. |
 | `cutouts/` | ERA5 cutouts (`.nc`) + `era5_cache/` (raw CDS download cache). Git-ignored. |
 | `solarpanel/` | PV panel configs (e.g. `CSi.yaml`, `CdTe_inv95.yaml`). |
 | `windturbines/` | Turbine power-curve configs (Vestas, Siemens Gamesa, NREL reference turbines, …). |

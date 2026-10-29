@@ -7,7 +7,7 @@ raster per TILE (the same country-group tiles as build_bathymetry_apac.py /
 build_wdpa_apac.py / the notebook's TILES dict), downloaded, downsampled and merged
 on demand:
 
-    geodata/worldcover_apac_{tile}_300m.tif
+    geodata/landcover/worldcover_apac_{tile}_300m.tif
 
 Run for a single tile (e.g. the Singapore proof of concept, which lives in the
 "maritime_sea" tile) with:
@@ -49,8 +49,8 @@ from rasterio.io import MemoryFile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-REGIONS = os.path.join(GEODATA, "fel_APAC_regions.geojson")
-OUT_TMPL = os.path.join(GEODATA, "worldcover_apac_{tile}_{res}.tif")
+REGIONS = os.path.join(GEODATA, "regions", "fel_APAC_regions.geojson")
+OUT_TMPL = os.path.join(GEODATA, "landcover", "worldcover_apac_{tile}_{res}.tif")
 
 BASE = "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map"
 CHUNK = 1 << 20
@@ -159,7 +159,7 @@ def build_tile(tile, force=False):
     minx, miny, maxx, maxy = sel.total_bounds
     W, S, E, N = minx - BBOX_PAD, miny - BBOX_PAD, maxx + BBOX_PAD, maxy + BBOX_PAD
 
-    tmpdir = os.path.join(GEODATA, f"_worldcover_apac_{tile}_tmp")
+    tmpdir = os.path.join(GEODATA, "_cache", f"worldcover_apac_{tile}")
     os.makedirs(tmpdir, exist_ok=True)
 
     tiles = tiles_for_bbox(W, S, E, N)

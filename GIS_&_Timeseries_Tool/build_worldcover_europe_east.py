@@ -1,12 +1,12 @@
 """Build the CORINE-gap land-cover raster for the Europe-hub RES tool from ESA WorldCover 10m.
 
-The bundled `geodata/corine.tif` covers the nine European tiles but not the two
+The bundled `geodata/landcover/corine.tif` covers the nine European tiles but not the two
 easternmost ones: `turkey_levant` (TR/GE/AM/AZ/IL) and `central_asia`
 (KZ/UZ/TM/TJ/KG). This fills that gap by downloading the ESA WorldCover 2021 v200
 tiles over BOTH regions (public AWS S3, no auth), downsampling each to ~300 m by
 class-preserving mode resampling, and merging them into a single EPSG:4326 GeoTIFF:
 
-    geodata/worldcover_europe_east_300m.tif
+    geodata/landcover/worldcover_europe_east_300m.tif
 
 The two regions are NOT contiguous (a gap over Iran/Iraq lies between the Levant box
 and the Central-Asia box), so the candidate 3-deg tile set is the UNION of the two
@@ -31,8 +31,8 @@ from rasterio.io import MemoryFile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-OUT = os.path.join(GEODATA, "worldcover_europe_east_300m.tif")
-TMPDIR = os.path.join(GEODATA, "_worldcover_europe_east_tmp")
+OUT = os.path.join(GEODATA, "landcover", "worldcover_europe_east_300m.tif")
+TMPDIR = os.path.join(GEODATA, "_cache", "worldcover_europe_east")
 os.makedirs(TMPDIR, exist_ok=True)
 
 # Two non-contiguous CORINE-gap regions as (W, S, E, N), small pad each. turkey_levant

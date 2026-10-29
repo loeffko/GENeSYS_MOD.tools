@@ -4,7 +4,7 @@ Downloads the per-country WDPA packs from Protected Planet (cloudfront, no token
 country packs), reads the polygon shapefiles nested in each outer zip, normalises the
 schema, and writes one merged GeoJSON:
 
-    geodata/wdpa_india.geojson
+    geodata/exclusions/wdpa_india.geojson
 
 Country packs (ISO3): IND (India), LKA (Sri Lanka), BTN (Bhutan). Nepal (NPL) has no
 cloudfront country-pack at the current release path, so it is skipped here; add it if
@@ -24,9 +24,9 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-TMPDIR = os.path.join(GEODATA, "_wdpa_india_tmp")
+TMPDIR = os.path.join(GEODATA, "_cache", "wdpa_india")
 os.makedirs(TMPDIR, exist_ok=True)
-OUT = os.path.join(GEODATA, "wdpa_india.geojson")
+OUT = os.path.join(GEODATA, "exclusions", "wdpa_india.geojson")
 
 RELEASE = "Sep2026"                      # month-stamp of the current WDPA release
 COUNTRIES = ["IND", "LKA", "BTN"]        # NPL has no cloudfront pack at this release

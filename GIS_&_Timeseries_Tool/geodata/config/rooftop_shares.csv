@@ -1,0 +1,76 @@
+iso2,iso3,country,residential,commercial,commercial_footprint,built_up_km2,nonres_km2,source,note
+AD,AND,Andorra,0.96,0.04,0.027,2.2,0.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+AL,ALB,Albania,0.945,0.055,0.037,237.3,8.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+AM,ARM,Armenia,0.952,0.048,0.032,221.5,7.2,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+AT,AUT,Austria,0.803,0.197,0.14,1144.6,160.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+AU,AUS,Australia,0.889,0.111,0.076,5111.1,391.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+AZ,AZE,Azerbaijan,0.963,0.037,0.025,843.8,20.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+BA,BIH,Bosnia and Herzegovina,0.914,0.086,0.059,362.3,21.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+BD,BGD,Bangladesh,0.98,0.02,0.013,2668.5,35.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+BE,BEL,Belgium,0.736,0.264,0.193,1515.1,292.5,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+BG,BGR,Bulgaria,0.824,0.176,0.124,867.3,107.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+BN,BRN,Brunei Darussalam,0.869,0.131,0.091,53.2,4.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+BT,BTN,Bhutan,0.978,0.022,0.015,30.3,0.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+BY,BLR,Belarus,0.823,0.177,0.125,1245.4,156.2,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+CA,CAN,Canada,0.785,0.215,0.154,4677.8,722.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+CH,CHE,Switzerland,0.807,0.193,0.138,790.0,108.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+CZ,CZE,Czechia,0.698,0.302,0.224,1357.4,303.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+DE,DEU,Germany,0.742,0.258,0.188,9544.7,1793.2,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+DK,DNK,Denmark,0.732,0.268,0.196,779.1,152.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+EE,EST,Estonia,0.78,0.22,0.158,188.9,29.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+ES,ESP,Spain,0.718,0.282,0.208,4352.5,903.5,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+FI,FIN,Finland,0.642,0.358,0.271,516.8,140.2,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+FR,FRA,France,0.829,0.171,0.121,9772.2,1179.2,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+GB,GBR,United Kingdom,0.792,0.208,0.149,5490.2,816.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+GE,GEO,Georgia,0.958,0.042,0.028,494.4,14.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+GR,GRC,Greece,0.866,0.134,0.093,1126.1,105.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+HR,HRV,Croatia,0.892,0.108,0.075,476.2,35.5,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+HU,HUN,Hungary,0.853,0.147,0.103,1299.4,134.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+ID,IDN,Indonesia,0.965,0.035,0.024,10551.8,250.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+IE,IRL,Ireland,0.853,0.147,0.103,716.4,73.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+IL,ISR,Israel,0.872,0.128,0.089,476.4,42.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+IN,IND,India,0.971,0.029,0.019,38218.7,740.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+IT,ITA,Italy,0.733,0.267,0.196,6823.9,1335.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+JP,JPN,Japan,0.916,0.084,0.058,12918.8,744.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+KG,KGZ,Kyrgyzstan,0.969,0.031,0.021,662.4,13.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+KH,KHM,Cambodia,0.965,0.035,0.024,815.2,19.5,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+KP,PRK,North Korea,0.915,0.085,0.058,378.9,22.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+KR,KOR,South Korea,0.871,0.129,0.09,3586.4,323.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+KZ,KAZ,Kazakhstan,0.939,0.061,0.042,2311.5,96.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+LA,LAO,Laos,0.983,0.017,0.011,336.9,3.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+LI,LIE,Liechtenstein,0.653,0.347,0.262,5.5,1.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+LK,LKA,Sri Lanka,0.979,0.021,0.014,964.8,13.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+LT,LTU,Lithuania,0.842,0.158,0.112,475.8,53.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+LU,LUX,Luxembourg,0.65,0.35,0.264,67.5,17.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+LV,LVA,Latvia,0.806,0.194,0.138,254.0,35.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+MC,MCO,Monaco,0.905,0.095,0.065,2.0,0.1,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+MD,MDA,Moldova,0.951,0.049,0.033,481.8,15.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+ME,MNE,Montenegro,0.872,0.128,0.089,37.9,3.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+MK,MKD,North Macedonia,0.901,0.099,0.068,176.5,12.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+MM,MMR,Myanmar,0.974,0.026,0.017,1229.7,21.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+MY,MYS,Malaysia,0.851,0.149,0.105,2068.7,216.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+NL,NLD,Netherlands,0.675,0.325,0.243,1890.3,459.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+NO,NOR,Norway,0.65,0.35,0.264,331.5,87.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+NP,NPL,Nepal,0.987,0.013,0.009,1094.5,9.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+NZ,NZL,New Zealand,0.947,0.053,0.036,963.9,34.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+PG,PNG,Papua New Guinea,0.956,0.044,0.03,189.0,5.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+PH,PHL,Philippines,0.918,0.082,0.056,2415.1,135.8,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+PL,POL,Poland,0.821,0.179,0.127,4555.3,576.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+PT,PRT,Portugal,0.845,0.155,0.109,1347.1,146.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+RO,ROU,Romania,0.905,0.095,0.065,2272.1,148.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+RS,SRB,Serbia,0.912,0.088,0.061,812.3,49.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+SE,SWE,Sweden,0.661,0.339,0.255,871.4,222.2,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+SG,SGP,Singapore,0.65,0.35,0.264,112.9,29.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+SI,SVN,Slovenia,0.838,0.162,0.114,257.2,29.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+SK,SVK,Slovakia,0.821,0.179,0.127,672.1,85.4,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+SM,SMR,San Marino,0.719,0.281,0.207,3.4,0.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+TH,THA,Thailand,0.949,0.051,0.034,6719.4,231.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+TJ,TJK,Tajikistan,0.976,0.024,0.016,735.6,12.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+TL,TLS,Timor-Leste,0.991,0.009,0.006,51.1,0.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+TM,TKM,Turkmenistan,0.971,0.029,0.02,752.3,14.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+TR,TUR,Türkiye,0.82,0.18,0.127,3376.9,430.3,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+UA,UKR,Ukraine,0.869,0.131,0.091,3990.6,363.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+US,USA,United States,0.839,0.161,0.113,59501.1,6733.7,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",
+UZ,UZB,Uzbekistan,0.979,0.021,0.014,3802.5,54.6,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+VN,VNM,Vietnam,0.96,0.04,0.027,5081.8,139.0,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",GHSL NRES likely under-detects non-residential here
+XK,XKX,Kosovo,0.887,0.113,0.079,100.3,7.9,"GHSL GHS_BUILT_S(_NRES) R2023A E2020 1km, NRES footprint x1.5 usable-roof factor",

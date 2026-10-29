@@ -4,7 +4,7 @@ Downloads the per-country WDPA packs from Protected Planet (cloudfront, no token
 country packs), reads the polygon shapefiles nested in each outer zip, normalises the
 schema, filters to the strict-protection IUCN tiers, and writes one merged GeoPackage:
 
-    geodata/wdpa_europe.gpkg
+    geodata/exclusions/wdpa_europe.gpkg
 
 The hub is 51 countries. An unfiltered 51-country WDPA GeoJSON would be multiple GB
 (Europe is densely protected), so two things keep it small:
@@ -31,9 +31,9 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GEODATA = os.path.join(HERE, "geodata")
-TMPDIR = os.path.join(GEODATA, "_wdpa_europe_tmp")
+TMPDIR = os.path.join(GEODATA, "_cache", "wdpa_europe")
 os.makedirs(TMPDIR, exist_ok=True)
-OUT = os.path.join(GEODATA, "wdpa_europe.gpkg")
+OUT = os.path.join(GEODATA, "exclusions", "wdpa_europe.gpkg")
 LAYER = "wdpa"
 
 RELEASE = "Sep2026"                       # month-stamp of the current WDPA release
