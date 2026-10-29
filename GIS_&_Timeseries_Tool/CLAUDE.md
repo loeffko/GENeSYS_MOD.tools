@@ -24,9 +24,11 @@ region-specific paths/parameters and call those functions.
   The root `.gitignore` ignores `geodata/*` and re-includes `config/`, `regions/`, `example/`. A new layer goes in the matching subfolder; a new build script writes there and caches raw downloads under `_cache/<name>/`.
 - `sources/data_sources.csv` — provenance for every externally sourced input (provider, version, URL, licence, local path, build script). Add a row when you bring in a new dataset; `TO CONFIRM` marks fields not yet known.
 - `cutouts/` — atlite ERA5 cutouts (`.nc`) + `era5_cache/` (raw CDS download cache). Large, git-ignored.
+  Cutouts and the local-only `geodata/` layers are kept on the project SharePoint, not in
+  git (repo size); `sources/data_sources.csv` lists each layer's local path.
 - `solarpanel/` — PV module configs (`CSi.yaml`, `CdTe.yaml`, `KANENA.yaml`).
 - `windturbines/` — turbine power-curve configs (referenced by `onshore_turbine`/`offshore_turbine`).
-- `output/` — generated CSVs + figures, one subfolder per timeframe. Git-ignored.
+- `output/` — generated results, git-ignored (see "Outputs and the transfer zip").
 
 ## Core design principle: region-agnostic functions
 
@@ -113,6 +115,41 @@ and `P_PV_Rooftop_Commercial`, so rooftop is split by segment:
 - In 2018 India results, commercial ≈ utility PV and residential is 3–7% lower; the hourly
   shape barely changes (east/west at a 20° pitch only widens the shoulders slightly).
 
+## Outputs and the transfer zip
+
+```
+output/
+  {timeframe}/                {timeframe}_{filename}_{series}.csv   timeseries
+    tiles/                    per-tile timeseries of a tiled run
+  potentials/[tiles|scenarios/<s>]/   {filename}_potentials_{combined|<region>|offshore...}.csv
+  coords/[tiles|scenarios/<s>]/       {filename}_coords_{onshore|rooftop|wind|offshore}_usable.csv
+  zip_transfer/               {timeframe}_{filename}_genesys_inputs.zip
+```
+
+- **One naming scheme**: `{timeframe}_{filename}_{series}`, e.g. `2018_india_heating`,
+  `2018_india_usable_pv_avg`. Usable-site runs pass `filename + "_usable"`, so their
+  series read `usable_<tech>_<cat>`. `_CF_FAMILIES` / `_HEAT_FAMILIES` in
+  `functions.py` list the series names.
+- **Year-agnostic results** (potentials, coords) live next to the timeframe folders.
+  `output_subdir(output_dir, kind)` gives the folder; `calculate_potentials_per_region`
+  takes `potentials_dir=` / `coords_dir=` (defaults: those folders), which the US
+  scenario loop sets to `.../scenarios/<s>/`. A later run with another weather year
+  overwrites them (the inf/avg/opt category split comes from the latest run's CFs).
+- **`potentials_combined`** is the per-region table on usable areas: onshore PV / wind
+  (incl. inf/avg/opt split), rooftop (incl. residential / commercial), and offshore
+  per depth class on usable offshore sites (depth AND offshore exclusions). Notebooks
+  set `offshore_cap_per_sqkm` / `offshore_percent_available` in the capacity-density
+  cell and pass them to the potentials loop.
+- **`create_transfer_zip(filename, timeframe, rooftop_segments=...)`** (last cell of each
+  notebook) bundles heat series + COPs (`heat/`), usable-site profiles (`profiles/`)
+  and `potentials_combined` (`potentials/`) with a `manifest.json` (units, meaning,
+  regions, tool commit, missing files) into `output/zip_transfer/`. For a tiled run it
+  takes the combined files, never `tiles/`. Missing files are warned, not fatal.
+- **Heat-pump "COP" files hold the inverse Carnot COP**, `(T_supply - T)/T_supply` at
+  55 degC supply (values ~0.04-0.2), not a COP; the manifest says so.
+- `migrate_output_layout.py [--dry-run] [output_root]` moves an old-layout `output/`
+  (flat year folders, `{tf}_{series}_{name}` heat files) to this layout. Idempotent.
+
 ## Adding a new region
 
 1. Make a region geojson (a `region` column for the region-geojson workflow) or use country ISO codes for the country workflow.
@@ -160,10 +197,16 @@ Mechanics worth knowing:
 - **Shared ERA5 chunk cache.** Each tile's cutout `.nc` is tile-scoped
   (`filename=f"{filename}_{tile}"`) so there are no collisions and re-runs reuse it;
   overlapping tile buffers reuse the same `cutouts/era5_cache/` downloads.
-- **Filename discipline.** Per-tile CF/potentials calls use the `_{tile}` suffix;
-  the combined CSVs are written under the **base** `filename`
-  (`{output_dir}/{timeframe}_{filename}_{tech}_{cat}.csv`,
-  `{output_dir}/{filename}_potentials_combined.csv`).
+- **Filename discipline.** Per-tile calls use `filename=f"{filename}_{tile}"` and write
+  to the `tiles/` subfolders (`output/{timeframe}/tiles/`, `output/potentials/tiles/`,
+  `output/coords/tiles/`); the combined files use the **base** `filename`
+  (`output/{timeframe}/{timeframe}_{filename}_{family}.csv`,
+  `output/potentials/{filename}_potentials_combined.csv`). Resume and cleanup match
+  exact family names, never a prefix glob (tile `central` vs `central_asia`).
+- **Usable-site profiles.** With potentials on, each tile also gets PV / onshore wind
+  (usable land set) / offshore (usable sites) / rooftop profiles as `usable_*`
+  families — the ones the transfer zip ships. `full_area_cf=False` skips the
+  all-cells PV/wind series.
 - **"Prove fast, scale later."** Start with a short `timeframe` (one day) and coarse
   `dx`/`dy` to smoke-test the tiling; the same code runs a full year by switching
   `timeframe="2018"` (cutouts + chunk cache reused). Set `run_potentials=False` to get

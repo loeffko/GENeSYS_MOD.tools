@@ -270,7 +270,7 @@ def pivot_and_categorize(
         df_opt = pd.pivot_table(df_opt, values='capacity_factor', index='time', columns='region', aggfunc=np.mean)
 
         if write_raw_data == True:
-            df.to_csv(output_dir + '/' + timeframe + '_' + out_tech + '_raw.csv', index=True)
+            df.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_raw.csv', index=True)
             display(df)
 
         df_inf.to_csv(output_dir + '/' + timeframe + '_' + filename + '_' + out_tech + '_inf.csv', index=True)
@@ -316,7 +316,7 @@ def pivot_and_categorize(
 
         if write_raw_data == True:
             wnd100 = df[df['distance'] < 180]
-            wnd100.to_csv(output_dir + '/' + timeframe + '_wind_offshore_raw.csv', index=True)
+            wnd100.to_csv(output_dir + '/' + timeframe + '_' + filename + '_wind_offshore_raw.csv', index=True)
 
         df_shallow.to_csv(output_dir + '/' + timeframe + '_' + filename + '_wind_offshore_shallow.csv', index=True)
         df_transitional.to_csv(output_dir + '/' + timeframe + '_' + filename + '_wind_offshore_transitional.csv', index=True)
@@ -830,9 +830,9 @@ def temperature_timeseries(
     
     #Output raw data, if wanted
     if (write_raw_data==True): 
-        temp.to_csv(output_dir+'/'+timeframe+'_temperature_raw.csv', index=True)
+        temp.to_csv(output_dir+'/'+timeframe+'_'+filename+'_temperature_raw.csv', index=True)
     
-    df_temp.to_csv(output_dir+'/'+timeframe+'_temperature_'+filename+'.csv', index=True)
+    df_temp.to_csv(output_dir+'/'+timeframe+'_'+filename+'_temperature.csv', index=True)
     
     temp['heating_demand'] = round((20-temp['temperature']).clip(lower=0),4)
     
@@ -846,10 +846,10 @@ def temperature_timeseries(
     
     df_cooling = pd.pivot_table(temp, values='cooling_demand', index='time', columns='region', aggfunc=np.mean).copy()
     
-    df_heating.to_csv(output_dir+'/'+timeframe+'_heating_'+filename+'.csv', index=True)
-    df_cooling.to_csv(output_dir+'/'+timeframe+'_cooling_'+filename+'.csv', index=True)
+    df_heating.to_csv(output_dir+'/'+timeframe+'_'+filename+'_heating.csv', index=True)
+    df_cooling.to_csv(output_dir+'/'+timeframe+'_'+filename+'_cooling.csv', index=True)
     
-    df_heatpump_cop.to_csv(output_dir+'/'+timeframe+'_heatpump_cop_'+filename+'.csv', index=True)
+    df_heatpump_cop.to_csv(output_dir+'/'+timeframe+'_'+filename+'_heatpump_cop.csv', index=True)
     
     soil_temp = cutout.data['soil temperature'].to_dataframe().reset_index()
     
@@ -868,7 +868,7 @@ def temperature_timeseries(
     
     df_heatpump_ground_cop = pd.pivot_table(soil_temp, values='heatpump_cop', index='time', columns='region', aggfunc=np.mean).copy()
     
-    df_heatpump_ground_cop.to_csv(output_dir+'/'+timeframe+'_heatpump_ground_cop_'+filename+'.csv', index=True)
+    df_heatpump_ground_cop.to_csv(output_dir+'/'+timeframe+'_'+filename+'_heatpump_ground_cop.csv', index=True)
 
 
     if delete_vars == 0:
@@ -882,6 +882,11 @@ def temperature_timeseries(
 
 
 def create_output_folder(timeframe):
+    # output/
+    #   {timeframe}/        timeseries {timeframe}_{filename}_{series}.csv
+    #     tiles/            per-tile timeseries of a run_batch_by_tile run
+    #   coords/, potentials/  year-agnostic results (see output_subdir)
+    #   zip_transfer/       create_transfer_zip archives
     current_folder = os.getcwd()
     output_dir = os.path.join(current_folder, 'output', timeframe)
 
@@ -891,8 +896,18 @@ def create_output_folder(timeframe):
         print("You successfully created the output folder.")
     else:
         print("The output folder already exists.")
+    for kind in ("coords", "potentials"):
+        output_subdir(output_dir, kind)
 
     return output_dir
+
+
+def output_subdir(output_dir, kind):
+    """Folder for year-agnostic results ('coords', 'potentials', 'zip_transfer'),
+    next to the timeframe folder: output/2018 -> output/potentials. Created if missing."""
+    d = os.path.join(os.path.dirname(os.path.normpath(output_dir)), kind)
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def plot_country_map(cutout, zoom=False, size=8, zoom_factor_x=5, zoom_factor_y=5):
@@ -1723,7 +1738,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     color=None, matrix_cache=None,
                                     add_category=True, pv_solar_panel=None, wind_turbine=None,
                                     pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
-                                    rooftop_shares=None):
+                                    rooftop_shares=None, potentials_dir=None, coords_dir=None):
     """Memory-safe per-region GIS potentials with a stitched availability map.
 
     Processes one region at a time so atlite only ever rasterizes the land-cover
@@ -1749,9 +1764,18 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                'availability' share, for pv_rooftop_capacity_factors.
     - coords_offshore_usable : buildable offshore coords (depth-classed) if
                                coords_offshore was passed, else None.
+
+    Potentials are written to `potentials_dir` and usable coords to `coords_dir`;
+    both default to the year-agnostic folders next to output_dir (output_subdir).
+    The offshore columns of the combined table use the usable offshore sites
+    (depth AND offshore exclusions), like the onshore columns.
     """
     shapes_all, names = get_region_shapes(geo_file, regions, region_col=region_col)
     os.makedirs(output_dir, exist_ok=True)
+    potentials_dir = potentials_dir or output_subdir(output_dir, "potentials")
+    coords_dir = coords_dir or output_subdir(output_dir, "coords")
+    os.makedirs(potentials_dir, exist_ok=True)
+    os.makedirs(coords_dir, exist_ok=True)
 
     stitch_land = None      # running (y, x) sum across regions (PV land)
     stitch_wind = None      # running (y, x) sum across regions (wind land)
@@ -1806,7 +1830,7 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                 wind_cap_per_sqkm=wind_cap_per_sqkm, wind_percent_land_available=wind_percent_land_available,
                 rooftop_cap_per_sqkm=rooftop_cap_per_sqkm, rooftop_percent_area_available=rooftop_percent_area_available,
                 area_crs=area_crs, rooftop_shares=rooftop_shares)
-            region_df.to_csv(os.path.join(output_dir, f"{filename}_potentials_{name}.csv"), index=False)
+            region_df.to_csv(os.path.join(potentials_dir, f"{filename}_potentials_{name}.csv"), index=False)
             per_region_tables.append(region_df)
 
             # usable sites for this region (cells with developable area), for the
@@ -1833,11 +1857,23 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
     combined = (pd.concat(per_region_tables, ignore_index=True)
                 if per_region_tables else pd.DataFrame())
 
-    # Append offshore wind potential as extra columns (one per depth class) on the
-    # combined per-region table, so onshore + offshore live in one file.
-    if coords_offshore is not None and not combined.empty:
+    # Buildable offshore sites: depth-classed cells minus the offshore exclusions
+    # (e.g. marine protected areas). 'category' = depth_class, its natural site class.
+    coords_offshore_usable = None
+    if coords_offshore is not None:
+        coords_offshore_usable = usable_offshore_coords(
+            coords_offshore, exclude_files=offshore_exclude_files,
+            exclude_layer=offshore_exclude_layer, exclude_query=offshore_exclude_query,
+            exclude_buffer=offshore_exclude_buffer)
+        if "depth_class" in coords_offshore_usable.columns:
+            coords_offshore_usable["category"] = coords_offshore_usable["depth_class"]
+
+    # Append offshore wind potential on those usable sites as extra columns (one per
+    # depth class) on the combined per-region table, so onshore + offshore live in
+    # one file.
+    if coords_offshore_usable is not None and not combined.empty:
         _off = calculate_offshore_potentials(
-            cutout, coords_offshore,
+            cutout, coords_offshore_usable,
             offshore_cap_per_sqkm=offshore_cap_per_sqkm,
             offshore_percent_available=offshore_percent_available,
             area_crs=area_crs)
@@ -1941,29 +1977,20 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
         if _wd_split is not None:
             combined = combined.merge(_wd_split.reset_index(), on="region", how="left")
 
-    combined.to_csv(os.path.join(output_dir, f"{filename}_potentials_combined.csv"), index=False)
+    combined.to_csv(os.path.join(potentials_dir, f"{filename}_potentials_combined.csv"), index=False)
 
     coords_onshore_usable.to_csv(
-        os.path.join(output_dir, f"{filename}_coords_onshore_usable.csv"), index=False)
+        os.path.join(coords_dir, f"{filename}_coords_onshore_usable.csv"), index=False)
     coords_rooftop_usable.to_csv(
-        os.path.join(output_dir, f"{filename}_coords_rooftop_usable.csv"), index=False)
+        os.path.join(coords_dir, f"{filename}_coords_rooftop_usable.csv"), index=False)
     # Wind usable coords are written only when wind has its own excluder (else they
     # equal the onshore/PV land set).
     if wind_excluder is not None:
         coords_wind_usable.to_csv(
-            os.path.join(output_dir, f"{filename}_coords_wind_usable.csv"), index=False)
-
-    coords_offshore_usable = None
-    if coords_offshore is not None:
-        # offshore 'category' = depth_class (its natural site class)
-        coords_offshore_usable = usable_offshore_coords(
-            coords_offshore, exclude_files=offshore_exclude_files,
-            exclude_layer=offshore_exclude_layer, exclude_query=offshore_exclude_query,
-            exclude_buffer=offshore_exclude_buffer)
-        if "depth_class" in coords_offshore_usable.columns:
-            coords_offshore_usable["category"] = coords_offshore_usable["depth_class"]
+            os.path.join(coords_dir, f"{filename}_coords_wind_usable.csv"), index=False)
+    if coords_offshore_usable is not None:
         coords_offshore_usable.to_csv(
-            os.path.join(output_dir, f"{filename}_coords_offshore_usable.csv"), index=False)
+            os.path.join(coords_dir, f"{filename}_coords_offshore_usable.csv"), index=False)
 
     # Return signature kept at 6 for back-compatibility; the wind usable set (when a
     # separate wind_excluder is used) is written to {filename}_coords_wind_usable.csv.
@@ -1988,7 +2015,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                       offshore_exclude_query=None, offshore_exclude_buffer=0,
                       usable_threshold=0.01, usable_threshold_rooftop=None, usable_round_to=2,
                       run_pv=True, run_wind_onshore=True, run_wind_offshore=True,
-                      run_temperature=True, run_potentials=True,
+                      run_temperature=True, run_potentials=True, full_area_cf=True,
                       estimate_only=False, skip_if_combined_exists=False,
                       keep_per_tile_files=True,
                       output_dir='output/', region_col='region', area_crs=None,
@@ -2051,6 +2078,16 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
     family 'pv_rooftop_{segment}'; `rooftop_shares` splits the rooftop potential
     (one {segment: share}, or per region via load_rooftop_shares).
 
+    Capacity factors: with potentials, PV / onshore wind / offshore wind / rooftop
+    are also computed on each tile's USABLE sites (families 'usable_*', the ones a
+    model should use). `full_area_cf=False` skips the all-cells PV/wind series.
+
+    Files: per-tile series go to {output_dir}/tiles/, per-tile potentials and coords
+    to output/potentials/tiles/ and output/coords/tiles/. The combined series are
+    {output_dir}/{timeframe}_{filename}_{family}.csv (e.g. 2018_europe_usable_pv_avg,
+    2018_europe_heating) and the combined potentials
+    output/potentials/{filename}_potentials_combined.csv.
+
     Returns a dict:
       - "cf"                  : {family: combined (time x all-regions) DataFrame}
       - "potentials_combined" : one row per region (all tiles concatenated)
@@ -2059,6 +2096,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
       - "tiles_run"/"tiles_skipped"/"missing_codes"
     """
     os.makedirs(output_dir, exist_ok=True)
+    tiles_dir = os.path.join(output_dir, "tiles")
+    potentials_dir = output_subdir(output_dir, "potentials")
+    tile_potentials_dir = os.path.join(potentials_dir, "tiles")
+    tile_coords_dir = os.path.join(output_subdir(output_dir, "coords"), "tiles")
+    for d in (tiles_dir, tile_potentials_dir, tile_coords_dir):
+        os.makedirs(d, exist_ok=True)
 
     gdf = gpd.read_file(geo_file).to_crs("EPSG:4326")
     if region_col not in gdf.columns or "iso_a2" in gdf.columns:
@@ -2086,7 +2129,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         print(f"Note: {len(uncovered)} region(s) in the geojson are in no tile: {uncovered}")
 
     # Per-family accumulators of per-tile (time x region) frames, concatenated at the
-    # end. Families match the existing output naming so the combined CSVs are drop-in.
+    # end. A family is the series part of the file name: {timeframe}_{name}_{family}.csv.
     cf_parts = {}
     potentials_parts = []
     maps = []
@@ -2097,9 +2140,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         if frame is not None and not frame.empty:
             cf_parts.setdefault(family, []).append(frame)
 
-    fam_files = dict(_CF_FAMILY_FILES)
-    for seg in (rooftop_segments or ROOFTOP_SEGMENTS):
-        fam_files[f"pv_rooftop_{seg}"] = ("pv_rooftop", seg)
+    roof_fams = [f"pv_rooftop_{seg}" for seg in (rooftop_segments or ROOFTOP_SEGMENTS)]
+    families = (_CF_FAMILIES + _HEAT_FAMILIES
+                + [f"usable_{f}" for f in _CF_FAMILIES + roof_fams])
+
+    def _series_path(folder, name, family):
+        return os.path.join(folder, f"{timeframe}_{name}_{family}.csv")
 
     for tile, codes in tiles.items():
         tile_codes = [c for c in codes if c in available]
@@ -2112,16 +2158,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
 
         # Resume: if this tile's combined potentials CSV already exists, read the
         # per-tile results back instead of rebuilding the cutout.
-        pot_csv = os.path.join(output_dir, f"{tile_filename}_potentials_combined.csv")
+        pot_csv = os.path.join(tile_potentials_dir, f"{tile_filename}_potentials_combined.csv")
         if skip_if_combined_exists and os.path.exists(pot_csv):
             print(f"Tile '{tile}': per-tile outputs exist, reading back and skipping build.")
             potentials_parts.append(pd.read_csv(pot_csv))
-            for fam, (tech, cat) in fam_files.items():
-                p = os.path.join(output_dir, f"{timeframe}_{tile_filename}_{tech}_{cat}.csv")
-                if os.path.exists(p):
-                    _accum(fam, pd.read_csv(p, index_col=0))
-            for fam in ("temperature", "heating", "cooling", "heatpump_cop", "heatpump_ground_cop"):
-                p = os.path.join(output_dir, f"{timeframe}_{fam}_{tile_filename}.csv")
+            for fam in families:
+                p = _series_path(tiles_dir, tile_filename, fam)
                 if os.path.exists(p):
                     _accum(fam, pd.read_csv(p, index_col=0))
             tiles_run.append(tile)
@@ -2161,36 +2203,35 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         tile_area_crs = area_crs or equal_area_crs(tile_shapes)
 
         # --- capacity factors (each writes per-tile CSVs, returns time x region) ---
-        if run_pv and solar_panel is not None:
-            pv_inf, pv_avg, pv_opt = pv_capacity_factors(
-                cutout, coords_onshore, solar_panel,
-                pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
-                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
-            _accum("pv_inf", pv_inf); _accum("pv_avg", pv_avg); _accum("pv_opt", pv_opt)
+        def _cf_set(coords_on, coords_off, name, prefix):
+            if run_pv and solar_panel is not None and len(coords_on):
+                for cat, df in zip(("inf", "avg", "opt"), pv_capacity_factors(
+                        cutout, coords_on, solar_panel,
+                        pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
+                        timeframe=timeframe, filename=name, output_dir=tiles_dir)):
+                    _accum(f"{prefix}pv_{cat}", df)
+            if run_wind_onshore and len(coords_on):
+                for cat, df in zip(("inf", "avg", "opt"), wind_onshore_capacity_factors(
+                        cutout, coords_on, onshore_turbine,
+                        timeframe=timeframe, filename=name, output_dir=tiles_dir)):
+                    _accum(f"{prefix}wind_onshore_{cat}", df)
+            if run_wind_offshore and coords_off is not None and len(coords_off):
+                for cat, df in zip(("shallow", "transitional", "deep"), wind_offshore_capacity_factors(
+                        cutout, coords_off, offshore_turbine,
+                        timeframe=timeframe, filename=name, output_dir=tiles_dir)):
+                    _accum(f"{prefix}wind_offshore_{cat}", df)
 
-        if run_wind_onshore:
-            wo_inf, wo_avg, wo_opt = wind_onshore_capacity_factors(
-                cutout, coords_onshore, onshore_turbine,
-                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
-            _accum("wind_onshore_inf", wo_inf); _accum("wind_onshore_avg", wo_avg)
-            _accum("wind_onshore_opt", wo_opt)
-
-        if run_wind_offshore and has_offshore:
-            ws, wt, wd = wind_offshore_capacity_factors(
-                cutout, coords_offshore, offshore_turbine,
-                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
-            _accum("wind_offshore_shallow", ws)
-            _accum("wind_offshore_transitional", wt)
-            _accum("wind_offshore_deep", wd)
+        if full_area_cf:
+            _cf_set(coords_onshore, coords_offshore if has_offshore else None, tile_filename, "")
 
         if run_temperature:
             hp_ground, cooling, heating, hp_cop = temperature_timeseries(
                 cutout, coords_onshore,
-                timeframe=timeframe, filename=tile_filename, output_dir=output_dir)
+                timeframe=timeframe, filename=tile_filename, output_dir=tiles_dir)
             _accum("heatpump_ground_cop", hp_ground); _accum("cooling", cooling)
             _accum("heating", heating); _accum("heatpump_cop", hp_cop)
             # plain temperature is written to CSV but not returned; read it back.
-            tpath = os.path.join(output_dir, f"{timeframe}_temperature_{tile_filename}.csv")
+            tpath = _series_path(tiles_dir, tile_filename, "temperature")
             if os.path.exists(tpath):
                 _accum("temperature", pd.read_csv(tpath, index_col=0))
 
@@ -2247,19 +2288,23 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                 usable_threshold=usable_threshold,
                 usable_threshold_rooftop=usable_threshold_rooftop,
                 usable_round_to=usable_round_to,
-                area_crs=tile_area_crs, output_dir=output_dir, filename=tile_filename,
+                area_crs=tile_area_crs, output_dir=tiles_dir, filename=tile_filename,
+                potentials_dir=tile_potentials_dir, coords_dir=tile_coords_dir,
                 pv_solar_panel=solar_panel, wind_turbine=onshore_turbine,
                 pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
                 rooftop_shares=rooftop_shares,
                 plot=plot, verbose=verbose, color=color)
             potentials_parts.append(combined_df)
+            # usable-site profiles (PV and onshore wind on the usable land set, like
+            # the single-region notebooks; offshore on depth+exclusion-filtered sites)
+            _cf_set(_con_u, _coff_u, f"{tile_filename}_usable", "usable_")
             if run_pv and solar_panel is not None and not _crf_u.empty:
                 roof_cf = pv_rooftop_capacity_factors(
                     cutout, _crf_u, solar_panel, segments=rooftop_segments,
-                    timeframe=timeframe, filename=tile_filename, output_dir=output_dir,
-                    area_crs=tile_area_crs)
+                    timeframe=timeframe, filename=f"{tile_filename}_usable",
+                    output_dir=tiles_dir, area_crs=tile_area_crs)
                 for seg, series in roof_cf.items():
-                    _accum(f"pv_rooftop_{seg}", series)
+                    _accum(f"usable_pv_rooftop_{seg}", series)
             maps.append((tile, stitch_land, stitch_roof,
                          (minx - bbox_buffer, miny - bbox_buffer,
                           maxx + bbox_buffer, maxy + bbox_buffer)))
@@ -2273,8 +2318,13 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         tiles_run.append(tile)
 
         if not keep_per_tile_files:
+            # exact names only: a prefix glob on tile 'central' would also hit
+            # 'central_asia'.
             import glob
-            for p in glob.glob(os.path.join(output_dir, f"*{tile_filename}*.csv")):
+            doomed = [_series_path(tiles_dir, tile_filename, f) for f in families]
+            doomed += glob.glob(os.path.join(tile_potentials_dir, f"{tile_filename}_potentials_*.csv"))
+            doomed += glob.glob(os.path.join(tile_coords_dir, f"{tile_filename}_coords_*.csv"))
+            for p in doomed:
                 try:
                     os.remove(p)
                 except OSError:
@@ -2301,11 +2351,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         combined = pd.concat(parts, axis=1)
         combined = combined.loc[:, ~combined.columns.duplicated()]
         cf_combined[fam] = combined
-        if fam in fam_files:
-            tech, cat = fam_files[fam]
-            combined.to_csv(os.path.join(output_dir, f"{timeframe}_{filename}_{tech}_{cat}.csv"))
-        else:  # temperature families: {timeframe}_{fam}_{filename}.csv
-            combined.to_csv(os.path.join(output_dir, f"{timeframe}_{fam}_{filename}.csv"))
+        combined.to_csv(_series_path(output_dir, filename, fam))
 
     potentials_combined = None
     if potentials_parts:
@@ -2315,7 +2361,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         if _off_cols:
             potentials_combined[_off_cols] = potentials_combined[_off_cols].fillna(0)
         potentials_combined.to_csv(
-            os.path.join(output_dir, f"{filename}_potentials_combined.csv"), index=False)
+            os.path.join(potentials_dir, f"{filename}_potentials_combined.csv"), index=False)
 
     print(f"\nBatch done: {len(tiles_run)} tiles run, {len(tiles_skipped)} skipped. "
           f"Combined CSVs written under base filename '{filename}'.")
@@ -2324,17 +2370,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
             "missing_codes": missing_codes}
 
 
-# Maps a combined-CF family name to the (tech, category) tokens used in the
-# pivot_and_categorize output filenames ({timeframe}_{filename}_{tech}_{cat}.csv).
-_CF_FAMILY_FILES = {
-    "pv_inf": ("pv", "inf"), "pv_avg": ("pv", "avg"), "pv_opt": ("pv", "opt"),
-    "wind_onshore_inf": ("wind_onshore", "inf"),
-    "wind_onshore_avg": ("wind_onshore", "avg"),
-    "wind_onshore_opt": ("wind_onshore", "opt"),
-    "wind_offshore_shallow": ("wind_offshore", "shallow"),
-    "wind_offshore_transitional": ("wind_offshore", "transitional"),
-    "wind_offshore_deep": ("wind_offshore", "deep"),
-}
+# Series names (the {family} in {timeframe}_{name}_{family}.csv) written by
+# pivot_and_categorize and temperature_timeseries.
+_CF_FAMILIES = ["pv_inf", "pv_avg", "pv_opt",
+                "wind_onshore_inf", "wind_onshore_avg", "wind_onshore_opt",
+                "wind_offshore_shallow", "wind_offshore_transitional", "wind_offshore_deep"]
+_HEAT_FAMILIES = ["temperature", "heating", "cooling", "heatpump_cop", "heatpump_ground_cop"]
 
 
 def combine_and_plot_tile_maps(map_list, which="land", geo_file=None, color=None,
@@ -2612,3 +2653,118 @@ def plot_usable_coords(coords, shapes=None, boundary_file=None, color_by="availa
     ax.set_title(title or f"Usable cells ({len(pts)}) by {color_by}")
     ax.set_xlabel("lon"); ax.set_ylabel("lat")
     return ax
+
+
+# ---------------------------------------------------------------------------
+# Transfer archive for GENeSYS-MOD
+# ---------------------------------------------------------------------------
+
+_SERIES_INFO = {
+    "pv_inf": ("capacity factor (0-1)", "Utility-scale PV, usable sites, lowest-yield 30% of cells"),
+    "pv_avg": ("capacity factor (0-1)", "Utility-scale PV, usable sites, middle 40% of cells"),
+    "pv_opt": ("capacity factor (0-1)", "Utility-scale PV, usable sites, highest-yield 30% of cells"),
+    "pv_rooftop_residential": ("capacity factor (0-1)",
+                               "Rooftop PV, residential mix of orientations (P_PV_Rooftop_Residential)"),
+    "pv_rooftop_commercial": ("capacity factor (0-1)",
+                              "Rooftop PV, commercial flat roofs at optimal tilt (P_PV_Rooftop_Commercial)"),
+    "wind_onshore_inf": ("capacity factor (0-1)", "Onshore wind, usable sites, lowest-yield 30% of cells"),
+    "wind_onshore_avg": ("capacity factor (0-1)", "Onshore wind, usable sites, middle 40% of cells"),
+    "wind_onshore_opt": ("capacity factor (0-1)", "Onshore wind, usable sites, highest-yield 30% of cells"),
+    "wind_offshore_shallow": ("capacity factor (0-1)", "Offshore wind, usable sites, 0-30 m depth (fixed)"),
+    "wind_offshore_transitional": ("capacity factor (0-1)", "Offshore wind, usable sites, 30-60 m depth (fixed)"),
+    "wind_offshore_deep": ("capacity factor (0-1)", "Offshore wind, usable sites, 60-1000 m depth (floating)"),
+    "temperature": ("degC", "Air temperature, mean over the region's onshore cells"),
+    "heating": ("index (regional mean = 1)",
+                "Heating profile: ((20 degC - T)+ / regional mean + 0.25) / 1.25"),
+    "cooling": ("K (degree-hours)", "Cooling profile: (T - 22 degC)+"),
+    "heatpump_cop": ("ratio", "Air-source heat pump: (T_supply - T_air) / T_supply with "
+                     "T_supply = 55 degC, i.e. the INVERSE Carnot COP (electricity per unit heat)"),
+    "heatpump_ground_cop": ("ratio", "Ground-source heat pump: as heatpump_cop with soil "
+                            "temperature instead of air temperature (inverse Carnot COP)"),
+}
+
+
+def create_transfer_zip(filename, timeframe, output_root="output", rooftop_segments=None,
+                        strict=False):
+    """Bundle one run's GENeSYS-MOD inputs into output/zip_transfer/ for the data repo.
+
+    Picks up, for run `filename` and weather year `timeframe`:
+      heat/       {timeframe}_{filename}_{temperature|heating|cooling|heatpump_cop|
+                  heatpump_ground_cop}.csv
+      profiles/   {timeframe}_{filename}_usable_{pv_*|pv_rooftop_*|wind_onshore_*|
+                  wind_offshore_*}.csv   (usable sites only)
+      potentials/ {filename}_potentials_combined.csv   (usable-area potentials, GW)
+    plus manifest.json describing every file (unit, meaning, regions, tool commit).
+    For a tiled run the combined files are taken, never the per-tile ones in tiles/.
+    Missing files are listed in the manifest and printed; strict=True raises instead
+    (offshore profiles are legitimately absent for a landlocked run).
+    Returns the zip path.
+    """
+    import zipfile
+    import subprocess
+    from datetime import datetime, timezone
+
+    ts_dir = os.path.join(output_root, timeframe)
+    roof = [f"pv_rooftop_{seg}" for seg in (rooftop_segments or ROOFTOP_SEGMENTS)]
+    wanted = ([("heat", ts_dir, f"{timeframe}_{filename}_{f}.csv", f) for f in _HEAT_FAMILIES]
+              + [("profiles", ts_dir, f"{timeframe}_{filename}_usable_{f}.csv", f)
+                 for f in _CF_FAMILIES[:3] + roof + _CF_FAMILIES[3:]]
+              + [("potentials", os.path.join(output_root, "potentials"),
+                  f"{filename}_potentials_combined.csv", "potentials_combined")])
+
+    found, missing, regions = [], [], set()
+    for folder, src_dir, name, series in wanted:
+        path = os.path.join(src_dir, name)
+        if not os.path.exists(path):
+            missing.append(f"{folder}/{name}")
+            continue
+        if folder == "potentials":
+            unit, desc = ("GW / km2", "Capacity potential per region and technology on "
+                          "usable areas (onshore PV, wind, rooftop by segment, offshore "
+                          "by depth class)")
+            regions.update(pd.read_csv(path, usecols=["region"])["region"].astype(str))
+        else:
+            unit, desc = _SERIES_INFO[series]
+            regions.update(pd.read_csv(path, index_col=0, nrows=0).columns.astype(str))
+        found.append((f"{folder}/{name}", path,
+                      {"path": f"{folder}/{name}", "series": series, "unit": unit,
+                       "description": desc}))
+    if not found:
+        raise FileNotFoundError(f"no outputs for filename={filename!r}, timeframe={timeframe!r} "
+                                f"under {output_root}/")
+    if missing:
+        msg = f"{len(missing)} expected file(s) missing: " + ", ".join(missing)
+        if strict:
+            raise FileNotFoundError(msg)
+        print("Warning:", msg)
+
+    tool_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tool_dir, capture_output=True,
+                                text=True, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain", "--", "."], cwd=tool_dir,
+                                    capture_output=True, text=True).stdout.strip())
+    except (OSError, subprocess.CalledProcessError):
+        commit, dirty = None, None
+
+    manifest = {
+        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "tool": "GENeSYS-MOD GIS & Timeseries Tool (functions.create_transfer_zip)",
+        "tool_commit": commit, "tool_uncommitted_changes": dirty,
+        "filename": filename, "weather_year": timeframe,
+        "regions": sorted(regions),
+        "conventions": "Timeseries: hourly, ERA5 timestamps (UTC), index 'time', one "
+                       "column per region. Profiles cover usable sites only.",
+        "files": [f[2] for f in found],
+        "missing": missing,
+    }
+
+    zip_dir = output_subdir(ts_dir, "zip_transfer")
+    zip_path = os.path.join(zip_dir, f"{timeframe}_{filename}_genesys_inputs.zip")
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for arcname, path, _ in found:
+            z.write(path, arcname)
+        z.writestr("manifest.json", json.dumps(manifest, indent=2))
+    print(f"wrote {zip_path}: {len(found)} files, {len(regions)} regions"
+          + (f", {len(missing)} missing" if missing else ""))
+    return zip_path

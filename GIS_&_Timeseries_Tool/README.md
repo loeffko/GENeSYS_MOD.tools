@@ -56,7 +56,8 @@ Effect of stacking exclusion filters on the onshore wind potential (US example: 
 | `cutouts/` | ERA5 cutouts (`.nc`) + `era5_cache/` (raw CDS download cache). Git-ignored. |
 | `solarpanel/` | PV panel configs (e.g. `CSi.yaml`, `CdTe_inv95.yaml`). |
 | `windturbines/` | Turbine power-curve configs (Vestas, Siemens Gamesa, NREL reference turbines, …). |
-| `output/` | Generated CSVs and figures, one subfolder per timeframe. Git-ignored. |
+| `output/` | Generated results: timeseries per weather year, plus `potentials/`, `coords/` and `zip_transfer/`. Git-ignored. See [Outputs](#outputs). |
+| `migrate_output_layout.py` | Moves an `output/` folder from the old flat layout to the current one. |
 
 ## Requirements
 
@@ -90,15 +91,20 @@ Open a notebook (start with [GENeSYS-MOD_RES_Tool.ipynb](GENeSYS-MOD_RES_Tool.ip
 
 ## Outputs
 
-All outputs land in `output/<timeframe>/`, prefixed with the timeframe and cutout filename:
+Every timeseries is named `<year>_<run>_<series>.csv`, where `<run>` is the notebook's `filename`:
 
-- `<year>_<region>_pv_{opt,avg,inf,horizontal}.csv` — PV capacity factors per site-quality category
-- `<year>_<region>_wind_onshore_{opt,avg,inf}.csv`, `..._wind_offshore_{shallow,transitional,deep}.csv`
-- `<year>_<region>_usable_*.csv` — same, restricted to developable sites (incl. `pv_rooftop`)
-- `<year>_temperature_<region>.csv`, `..._heatpump_cop_...`, `..._heatpump_ground_cop_...`, `..._heating_...`, `..._cooling_...`
-- `<region>_potentials_<REGION>.csv` + `<region>_potentials_combined.csv` — installable capacity (GW) per region and technology
-- `<region>_potentials_offshore.csv` — offshore potential per region and depth class
-- `output/coords/` — cached usable-site coordinates, reloadable in later runs (`load_usable_coords`) so the expensive GIS pass doesn't need repeating
+- `output/<year>/` — timeseries:
+  - `..._usable_pv_{inf,avg,opt}`, `..._usable_pv_rooftop_{residential,commercial}`, `..._usable_wind_onshore_{inf,avg,opt}`, `..._usable_wind_offshore_{shallow,transitional,deep}` — capacity factors on developable sites only (what the model uses)
+  - `..._pv_*`, `..._wind_*` without `usable_` — the same over all cells
+  - `..._temperature`, `..._heating`, `..._cooling`, `..._heatpump_cop`, `..._heatpump_ground_cop`
+  - `tiles/` — per-tile files of a tiled (EU / APAC) run; the combined files sit one level up
+- `output/potentials/` — `<run>_potentials_combined.csv` (installable capacity in GW per region and technology on usable areas: PV, wind, rooftop by segment, offshore by depth class), per-region tables, offshore detail; `tiles/` and `scenarios/<name>/` for tiled and US scenario runs
+- `output/coords/` — usable-site coordinates per technology (same subfolders)
+- `output/zip_transfer/<year>_<run>_genesys_inputs.zip` — written by `create_transfer_zip` (last notebook cell): heat series and heat-pump COPs, usable-site profiles and `potentials_combined`, with a `manifest.json` describing each file. Copy it into the GENeSYS-MOD data repo's input folder.
+
+## Data not in git
+
+ERA5 cutouts (`cutouts/`) and the large input layers (`geodata/landcover/`, `geodata/exclusions/`, `geodata/offshore/`) are kept on the project SharePoint rather than in git, to keep the repository small. Copy them into the same folders locally. [sources/data_sources.csv](sources/data_sources.csv) lists every layer with its local path and original source; the `build_*.py` scripts rebuild most of them from public data.
 
 ## Adding a new region
 
