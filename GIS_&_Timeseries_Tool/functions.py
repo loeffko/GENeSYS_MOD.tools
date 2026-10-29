@@ -1354,7 +1354,14 @@ def equal_area_crs(shapes):
             "+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs")
 
 
-def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMatrix=None,AvailabilityMatrix_Rooftop=None,AvailabilityMatrix_Wind=None,pv_cap_per_sqkm=100,pv_percent_land_available=0.03,wind_cap_per_sqkm=27,wind_percent_land_available=0.03,rooftop_cap_per_sqkm=100,rooftop_percent_area_available=0.2,area_crs=None,rooftop_shares=None):
+# Utility-scale PV capacity density on eligible land (MW/km2), from Risch et al. 2022,
+# "Potentials of Renewable Energy Sources in Germany and the Influence of Land Use
+# Datasets", Energies 15, 5536, Eq. 3: ground coverage 0.5 x construction factor 0.72 /
+# 4.55 m2/kW module area (22 % efficiency) = 79.2 MW/km2. https://doi.org/10.3390/en15155536
+PV_CAP_PER_SQKM = 79.2
+
+
+def calculate_capacity_potentials(cutout=None,coords_onshore=None,AvailabilityMatrix=None,AvailabilityMatrix_Rooftop=None,AvailabilityMatrix_Wind=None,pv_cap_per_sqkm=PV_CAP_PER_SQKM,pv_percent_land_available=0.03,wind_cap_per_sqkm=27,wind_percent_land_available=0.03,rooftop_cap_per_sqkm=100,rooftop_percent_area_available=0.2,area_crs=None,rooftop_shares=None):
     # rooftop_shares: optional split of the rooftop potential into 'Rooftop Capacity
     # {segment} [GW]' columns, matching the segments of pv_rooftop_capacity_factors.
     # Either one {segment: share} for all regions, or {region: {segment: share}}
@@ -1509,7 +1516,8 @@ def _safe_nodata(raster_file):
 def make_land_excluder(land_cover_raster, exclude_codes, crs=None, raster_crs=None,
                        raster_nodata=None,
                        protected_files=None, protected_query=None,
-                       protected_layer=None, protected_buffer=0):
+                       protected_layer=None, protected_buffer=0,
+                       buffered_codes=None, code_buffer=0):
     """Build an excluder for utility-scale PV / onshore wind land availability.
 
     land_cover_raster : categorical land-cover raster (e.g. NLCD, CORINE).
@@ -1521,12 +1529,18 @@ def make_land_excluder(land_cover_raster, exclude_codes, crs=None, raster_crs=No
     protected_query   : pandas query to pre-filter protected areas before excluding
                         (e.g. "GAP_Sts in ['1','2']" for strict protection).
     protected_buffer  : buffer in CRS units (metres) around protected areas.
+    buffered_codes    : raster values excluded together with a `code_buffer` (CRS
+                        units, metres) around them, e.g. the built-up classes for a
+                        setback from settlements. Needs a projected `crs`.
     """
     excluder = ExclusionContainer(crs=crs or raster_crs or _raster_crs(land_cover_raster))
     # raster_crs is passed through for rasters that declare no CRS of their own;
     # nodata is forced to a dtype-safe value (atlite's default 255 overflows int8).
     nodata = raster_nodata if raster_nodata is not None else _safe_nodata(land_cover_raster)
     excluder.add_raster(land_cover_raster, codes=list(exclude_codes), crs=raster_crs, nodata=nodata)
+    if buffered_codes and code_buffer:
+        excluder.add_raster(land_cover_raster, codes=list(buffered_codes), buffer=code_buffer,
+                            crs=raster_crs, nodata=nodata)
     files = protected_files if protected_files is not None else []
     if isinstance(files, (str, os.PathLike, gpd.GeoDataFrame)):
         files = [files]
@@ -1724,7 +1738,7 @@ def _split_capacity_by_category(coords_cat, cutout, cap_per_sqkm, percent_availa
 def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     excluder, cities, wind_excluder=None,
                                     regions=None, region_col="region",
-                                    pv_cap_per_sqkm=100, pv_percent_land_available=0.03,
+                                    pv_cap_per_sqkm=PV_CAP_PER_SQKM, pv_percent_land_available=0.03,
                                     wind_cap_per_sqkm=27, wind_percent_land_available=0.03,
                                     rooftop_cap_per_sqkm=100, rooftop_percent_area_available=0.2,
                                     coords_offshore=None, usable_threshold=0.01,
@@ -1738,7 +1752,8 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     color=None, matrix_cache=None,
                                     add_category=True, pv_solar_panel=None, wind_turbine=None,
                                     pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
-                                    rooftop_shares=None, potentials_dir=None, coords_dir=None):
+                                    rooftop_shares=None, potentials_dir=None, coords_dir=None,
+                                    return_wind_coords=False):
     """Memory-safe per-region GIS potentials with a stitched availability map.
 
     Processes one region at a time so atlite only ever rasterizes the land-cover
@@ -1764,6 +1779,9 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                'availability' share, for pv_rooftop_capacity_factors.
     - coords_offshore_usable : buildable offshore coords (depth-classed) if
                                coords_offshore was passed, else None.
+    return_wind_coords=True appends a 7th item, coords_wind_usable: the usable sites
+    for onshore wind (from wind_excluder, else the PV land set). Use it for the wind
+    timeseries whenever PV and wind have different excluders.
 
     Potentials are written to `potentials_dir` and usable coords to `coords_dir`;
     both default to the year-agnostic folders next to output_dir (output_subdir).
@@ -1966,9 +1984,10 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             "PV Capacity", area_crs=area_crs)
         if _pv_split is not None:
             combined = combined.merge(_pv_split.reset_index(), on="region", how="left")
-    # wind uses its own usable set (own excluder) if present, else the PV land set
-    _wind_cat_src = (coords_wind_usable if (wind_excluder is not None
-                     and "category" in coords_wind_usable.columns)
+    # wind uses its own usable set (categories need wind_turbine); the PV land set is
+    # only a stand-in when both share one excluder, never when PV excludes more
+    _wind_cat_src = (coords_wind_usable if ("category" in coords_wind_usable.columns
+                                            or wind_excluder is not None)
                      else coords_onshore_usable)
     if not combined.empty and "category" in _wind_cat_src.columns:
         _wd_split = _split_capacity_by_category(
@@ -1993,9 +2012,11 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
             os.path.join(coords_dir, f"{filename}_coords_offshore_usable.csv"), index=False)
 
     # Return signature kept at 6 for back-compatibility; the wind usable set (when a
-    # separate wind_excluder is used) is written to {filename}_coords_wind_usable.csv.
-    return (combined, stitch_land, stitch_roof,
-            coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable)
+    # separate wind_excluder is used) is written to {filename}_coords_wind_usable.csv
+    # and returned as a 7th item with return_wind_coords=True.
+    out = (combined, stitch_land, stitch_roof,
+           coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable)
+    return out + (coords_wind_usable,) if return_wind_coords else out
 
 
 def run_batch_by_tile(tiles, geo_file, timeframe, filename,
@@ -2007,7 +2028,7 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                       rooftop_segments=None, rooftop_shares=None,
                       excluder=None, cities=None, wind_excluder=None,
                       tile_layers=None,
-                      pv_cap_per_sqkm=100, pv_percent_land_available=0.03,
+                      pv_cap_per_sqkm=PV_CAP_PER_SQKM, pv_percent_land_available=0.03,
                       wind_cap_per_sqkm=27, wind_percent_land_available=0.03,
                       rooftop_cap_per_sqkm=100, rooftop_percent_area_available=0.2,
                       offshore_cap_per_sqkm=5, offshore_percent_available=0.1,
@@ -2067,6 +2088,11 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                                  protected-area layer for this tile's excluders.
       - wind_extra_layers      : list of add_exclusion_layers() specs -> a wind-only
                                  excluder = land excluder + these extra no-build layers.
+      - pv_exclude_codes       : extra raster values excluded for utility PV only
+                                 (e.g. forest); wind keeps land_exclude_codes.
+      - pv_buffered_codes / pv_code_buffer : raster values (e.g. built-up) excluded
+                                 for PV with a buffer in metres around them.
+                                 Either PV key gives wind its own plain land excluder.
       - offshore_file / bathymetry_file : this tile's EEZ + bathymetry (set
                                  offshore_file to None to force a tile landlocked).
       - offshore_exclude_files / _layer / _query / _buffer : offshore exclusion for
@@ -2203,16 +2229,18 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
         tile_area_crs = area_crs or equal_area_crs(tile_shapes)
 
         # --- capacity factors (each writes per-tile CSVs, returns time x region) ---
-        def _cf_set(coords_on, coords_off, name, prefix):
+        def _cf_set(coords_on, coords_off, name, prefix, coords_wind=None):
+            # coords_wind: onshore-wind sites when they differ from the PV land set
+            coords_wind = coords_on if coords_wind is None else coords_wind
             if run_pv and solar_panel is not None and len(coords_on):
                 for cat, df in zip(("inf", "avg", "opt"), pv_capacity_factors(
                         cutout, coords_on, solar_panel,
                         pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
                         timeframe=timeframe, filename=name, output_dir=tiles_dir)):
                     _accum(f"{prefix}pv_{cat}", df)
-            if run_wind_onshore and len(coords_on):
+            if run_wind_onshore and len(coords_wind):
                 for cat, df in zip(("inf", "avg", "opt"), wind_onshore_capacity_factors(
-                        cutout, coords_on, onshore_turbine,
+                        cutout, coords_wind, onshore_turbine,
                         timeframe=timeframe, filename=name, output_dir=tiles_dir)):
                     _accum(f"{prefix}wind_onshore_{cat}", df)
             if run_wind_offshore and coords_off is not None and len(coords_off):
@@ -2248,30 +2276,32 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
             if _crs == "__equal_area__":            # geographic raster -> per-tile LAEA
                 _crs = equal_area_crs(tile_shapes)
             _declared = spec.get("raster_declared_crs")
+            _land = dict(crs=_crs, raster_crs=_declared,
+                         protected_files=spec.get("protected_files"),
+                         protected_query=spec.get("protected_query"),
+                         protected_layer=spec.get("protected_layer"),
+                         protected_buffer=spec.get("protected_buffer", 0))
+            # PV may exclude more than wind (pv_exclude_codes, a buffer around
+            # pv_buffered_codes); wind then gets the plain land excluder.
+            pv_only = bool(spec.get("pv_exclude_codes")
+                           or (spec.get("pv_buffered_codes") and spec.get("pv_code_buffer")))
             tile_excluder = make_land_excluder(
-                spec["land_raster"], spec["land_exclude_codes"],
-                crs=_crs, raster_crs=_declared,
-                protected_files=spec.get("protected_files"),
-                protected_query=spec.get("protected_query"),
-                protected_layer=spec.get("protected_layer"),
-                protected_buffer=spec.get("protected_buffer", 0))
+                spec["land_raster"],
+                list(spec["land_exclude_codes"]) + list(spec.get("pv_exclude_codes") or []),
+                buffered_codes=spec.get("pv_buffered_codes"),
+                code_buffer=spec.get("pv_code_buffer", 0), **_land)
             tile_cities = make_rooftop_excluder(
                 spec["land_raster"], spec.get("rooftop_codes", [50]),
                 crs=_crs, raster_crs=_declared)
-            if spec.get("wind_extra_layers"):
+            if pv_only or spec.get("wind_extra_layers"):
                 tile_wind_excluder = make_land_excluder(
-                    spec["land_raster"], spec["land_exclude_codes"],
-                    crs=_crs, raster_crs=_declared,
-                    protected_files=spec.get("protected_files"),
-                    protected_query=spec.get("protected_query"),
-                    protected_layer=spec.get("protected_layer"),
-                    protected_buffer=spec.get("protected_buffer", 0))
-                add_exclusion_layers(tile_wind_excluder, spec["wind_extra_layers"])
+                    spec["land_raster"], spec["land_exclude_codes"], **_land)
+                add_exclusion_layers(tile_wind_excluder, spec.get("wind_extra_layers"))
 
         # --- GIS potentials (memory-safe per region inside) ---
         if run_potentials and tile_excluder is not None and tile_cities is not None:
             (combined_df, stitch_land, stitch_roof,
-             _con_u, _crf_u, _coff_u) = calculate_potentials_per_region(
+             _con_u, _crf_u, _coff_u, _cwind_u) = calculate_potentials_per_region(
                 cutout, geo_file, coords_onshore, tile_excluder, tile_cities,
                 wind_excluder=tile_wind_excluder, regions=tile_codes, region_col=region_col,
                 coords_offshore=(coords_offshore if has_offshore else None),
@@ -2292,12 +2322,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                 potentials_dir=tile_potentials_dir, coords_dir=tile_coords_dir,
                 pv_solar_panel=solar_panel, wind_turbine=onshore_turbine,
                 pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
-                rooftop_shares=rooftop_shares,
+                rooftop_shares=rooftop_shares, return_wind_coords=True,
                 plot=plot, verbose=verbose, color=color)
             potentials_parts.append(combined_df)
-            # usable-site profiles (PV and onshore wind on the usable land set, like
-            # the single-region notebooks; offshore on depth+exclusion-filtered sites)
-            _cf_set(_con_u, _coff_u, f"{tile_filename}_usable", "usable_")
+            # usable-site profiles: PV on the PV land set, onshore wind on its own
+            # (wind-excluder) set, offshore on depth+exclusion-filtered sites
+            _cf_set(_con_u, _coff_u, f"{tile_filename}_usable", "usable_", coords_wind=_cwind_u)
             if run_pv and solar_panel is not None and not _crf_u.empty:
                 roof_cf = pv_rooftop_capacity_factors(
                     cutout, _crf_u, solar_panel, segments=rooftop_segments,
