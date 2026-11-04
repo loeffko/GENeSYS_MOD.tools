@@ -146,6 +146,11 @@ output/
   and `potentials_combined` (`potentials/`) with a `manifest.json` (units, meaning,
   regions, tool commit, missing files) into `output/zip_transfer/`. For a tiled run it
   takes the combined files, never `tiles/`. Missing files are warned, not fatal.
+  `run_info={...}` is copied into the manifest as is (e.g. turbines, panel, cutout).
+- **Turbine variants without a new download:** give the outputs a new `filename`
+  (e.g. `india_nrel`) but call `get_cutout` with the original name, so the variant
+  reuses the existing cutout and never overwrites the base run's outputs. The India
+  NREL packages (2020 ATB 4 MW onshore, 15 MW offshore) were built this way.
 - **Heat-pump "COP" files hold the inverse Carnot COP**, `(T_supply - T)/T_supply` at
   55 degC supply (values ~0.04-0.2), not a COP; the manifest says so.
 - `migrate_output_layout.py [--dry-run] [output_root]` moves an old-layout `output/`

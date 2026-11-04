@@ -2715,7 +2715,7 @@ _SERIES_INFO = {
 
 
 def create_transfer_zip(filename, timeframe, output_root="output", rooftop_segments=None,
-                        strict=False):
+                        strict=False, run_info=None):
     """Bundle one run's GENeSYS-MOD inputs into output/zip_transfer/ for the data repo.
 
     Picks up, for run `filename` and weather year `timeframe`:
@@ -2725,6 +2725,8 @@ def create_transfer_zip(filename, timeframe, output_root="output", rooftop_segme
                   wind_offshore_*}.csv   (usable sites only)
       potentials/ {filename}_potentials_combined.csv   (usable-area potentials, GW)
     plus manifest.json describing every file (unit, meaning, regions, tool commit).
+    `run_info` (dict, optional) is stored in the manifest as is, e.g. the turbine
+    and panel models the run used.
     For a tiled run the combined files are taken, never the per-tile ones in tiles/.
     Missing files are listed in the manifest and printed; strict=True raises instead
     (offshore profiles are legitimately absent for a landlocked run).
@@ -2782,6 +2784,7 @@ def create_transfer_zip(filename, timeframe, output_root="output", rooftop_segme
         "tool": "GENeSYS-MOD GIS & Timeseries Tool (functions.create_transfer_zip)",
         "tool_commit": commit, "tool_uncommitted_changes": dirty,
         "filename": filename, "weather_year": timeframe,
+        "run_info": run_info or {},
         "regions": sorted(regions),
         "conventions": "Timeseries: hourly, ERA5 timestamps (UTC), index 'time', one "
                        "column per region. Profiles cover usable sites only.",
