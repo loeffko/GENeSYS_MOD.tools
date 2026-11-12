@@ -104,24 +104,37 @@ def _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_
 
     out_cols = ["x", "y", "coords", "region", "distance"]
     if bathymetry_file is not None:
-        # nearest bathymetry sample per offshore cell; depth = metres below sea level.
-        # Auto-detect variable + coord names so different products work unchanged:
-        # the US file uses z / latitude / longitude, GEBCO uses elevation / lat / lon.
-        bds = xr.open_dataset(bathymetry_file)
-        zname = next((v for v in ("z", "elevation", "Band1") if v in bds.data_vars),
-                     list(bds.data_vars)[0])
-        latname = "latitude" if "latitude" in bds.coords else "lat"
-        lonname = "longitude" if "longitude" in bds.coords else "lon"
-        z = bds[zname].sel(
-            **{latname: xr.DataArray(coords_offshore["y"].values, dims="p"),
-               lonname: xr.DataArray(coords_offshore["x"].values, dims="p")},
-            method="nearest",
-        ).values
-        bds.close()
-        coords_offshore["depth"] = np.round(-z.astype(float), 1)
+        coords_offshore["depth"] = _sample_depth(bathymetry_file, coords_offshore["x"].values,
+                                                 coords_offshore["y"].values)
         out_cols.append("depth")
 
     return coords_onshore, coords_offshore[out_cols]
+
+
+def _sample_depth(bathymetry_file, lon, lat):
+    """Nearest bathymetry sample at each (lon, lat); depth = metres below sea level.
+
+    Auto-detects variable + coord names so different products work unchanged:
+    the US file uses z / latitude / longitude, GEBCO uses elevation / lat / lon.
+    """
+    bds = xr.open_dataset(bathymetry_file)
+    zname, latname, lonname = _bathymetry_names(bds)
+    z = bds[zname].sel(
+        **{latname: xr.DataArray(np.asarray(lat), dims="p"),
+           lonname: xr.DataArray(np.asarray(lon), dims="p")},
+        method="nearest",
+    ).values
+    bds.close()
+    return np.round(-z.astype(float), 1)
+
+
+def _bathymetry_names(bds):
+    """(elevation variable, lat coord, lon coord) names of a bathymetry dataset."""
+    zname = next((v for v in ("z", "elevation", "Band1") if v in bds.data_vars),
+                 list(bds.data_vars)[0])
+    latname = "latitude" if "latitude" in bds.coords else "lat"
+    lonname = "longitude" if "longitude" in bds.coords else "lon"
+    return zname, latname, lonname
 
 
 def get_coords(
@@ -1680,6 +1693,9 @@ def calculate_offshore_potentials(cutout, coords_offshore,
     area = cutout.grid.set_index(["y", "x"]).to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6
     area.name = "Area [km²]"
     df = coords_offshore.merge(area.reset_index(), on=["y", "x"], how="inner")
+    # zone cells (offshore_zone_coords): only the zone part of each cell counts
+    if "availability" in df.columns:
+        df["Area [km²]"] = df["Area [km²]"] * df["availability"]
 
     # classify each offshore cell by water depth, same scheme as the offshore
     # timeseries (shallow/transitional fixed-bottom, deep floating; drop deeper).
@@ -2559,6 +2575,54 @@ def usable_offshore_coords(coords_offshore, shallow_max=30, transitional_max=60,
     return df.reset_index(drop=True)
 
 
+def offshore_zone_coords(cutout, zones, coords_onshore, bathymetry_file=None,
+                         zones_layer=None, zones_query=None, share_col=None,
+                         threshold=0.01, area_crs=None):
+    """Offshore cells from designated offshore wind zones instead of the whole EEZ.
+
+    Every cutout cell a zone polygon overlaps becomes an offshore cell with
+    'availability' = zone area inside the cell / cell area, times the zone's
+    `share_col` value if given (e.g. the usable share of a coarse zone outline).
+    calculate_offshore_potentials then counts only that part of the cell. Cells are
+    taken from the grid, so zones in narrow bays whose cell centre lies on land
+    still count. Region = region of the nearest onshore cell and distance in nm, as
+    in get_coords; depth is sampled inside the zone part of the cell, not at the
+    cell centre. Zones must not overlap. Cells below `threshold` are dropped.
+
+    Returns get_coords' offshore columns plus 'availability'; use it as
+    coords_offshore for the rest of the pipeline.
+    """
+    crs = area_crs or equal_area_crs(cutout.grid)
+    grid = cutout.grid[["x", "y", "geometry"]].to_crs(crs)
+    z = _load_vector(zones, layer=zones_layer, query=zones_query).to_crs(crs)
+    z["_w"] = z[share_col].astype(float) if share_col else 1.0
+    parts = gpd.overlay(grid, z[["_w", "geometry"]], how="intersection", keep_geom_type=True)
+    if parts.empty:
+        print("Warning: no cutout cell overlaps the offshore zones")
+        return pd.DataFrame(columns=["x", "y", "coords", "region", "distance", "availability"])
+    parts["_a"] = parts.area * parts["_w"]
+    cell_area = grid.set_index(["x", "y"]).area
+    df = parts.groupby(["x", "y"], as_index=False)["_a"].sum()
+    df["availability"] = df["_a"].values / cell_area.loc[list(zip(df["x"], df["y"]))].values
+    df = df[df["availability"] >= threshold].drop(columns="_a").reset_index(drop=True)
+
+    df["coords"] = df["y"].astype(str) + ", " + df["x"].astype(str)
+    tree = BallTree(np.deg2rad(coords_onshore[["y", "x"]].values), metric="haversine")
+    dist, idx = tree.query(np.deg2rad(df[["y", "x"]].values))
+    df["region"] = coords_onshore["region"].values[idx.flatten()]
+    df["distance"] = dist.flatten() * 6371.0 / 1.852
+    cols = ["x", "y", "coords", "region", "distance"]
+    if bathymetry_file is not None:
+        # a point inside the largest zone part of each cell
+        big = parts.loc[parts.groupby(["x", "y"])["_a"].idxmax()].set_index(["x", "y"])
+        pts = big.geometry.representative_point().to_crs("EPSG:4326")
+        pts = pts.loc[list(zip(df["x"], df["y"]))]
+        df["depth"] = _sample_depth(bathymetry_file, pts.x.values, pts.y.values)
+        cols.append("depth")
+    print(f"offshore zones: {len(df)} cells, {df['availability'].sum():.2f} cell-equivalents")
+    return df[cols + ["availability"]]
+
+
 def plot_offshore_map(coords_offshore, shapes=None, offshore_file=None,
                       color_by="depth_class", size=8, point_size=6):
     """Map the usable offshore cells, coloured by depth class (or region).
@@ -2590,6 +2654,173 @@ def plot_offshore_map(coords_offshore, shapes=None, offshore_file=None,
     else:
         pts.plot(ax=ax, markersize=point_size)
     ax.set_title(f"Usable offshore cells by {color_by}")
+    return ax
+
+
+def plot_offshore_bathymetry(offshore_file, bathymetry_file, geo_file=None, regions=None,
+                             cutout_north_west=None, cutout_south_east=None,
+                             dx=0.25, dy=0.25, zones=None, shallow_max=30,
+                             transitional_max=60, floating_max=1000, extent=None,
+                             size=10, natural_earth_dataset="admin_0_map_units"):
+    """Map water depth, the EEZ and the offshore cells before the cutout is downloaded.
+
+    Takes the same extent/resolution arguments as estimate_cutout_size. Sea is shaded
+    by depth, in bands that include the depth-class limits, and faded outside the
+    EEZ (offshore_file). The dashed box is the
+    cutout extent: EEZ waters outside it get no offshore cells. Available cells, drawn
+    at cell size, are the cells get_coords + usable_offshore_coords keep (centre in the
+    EEZ and off the region polygons, 0 < depth <= floating_max). With `zones` (the
+    offshore_zone_coords input) the zones are drawn instead, with the cells they
+    overlap. `extent` = (minx, miny, maxx, maxy) zooms in; default: cutout + EEZ.
+    """
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch, Rectangle
+    from shapely.geometry import box
+    from rasterio import features
+    from rasterio.transform import from_bounds
+    import textwrap
+
+    minx, miny, maxx, maxy = _determine_cutout_bounds(
+        regions=regions, geo_file=geo_file, cutout_north_west=cutout_north_west,
+        cutout_south_east=cutout_south_east, natural_earth_dataset=natural_earth_dataset)
+    g = atlite_get_coords(x=slice(minx, maxx), y=slice(miny, maxy), time="2013-01-01",
+                          dx=dx, dy=dy)
+    gx, gy = g["x"].values, g["y"].values
+    xx, yy = np.meshgrid(gx, gy)
+    pts = gpd.GeoDataFrame({"x": xx.ravel(), "y": yy.ravel()},
+                           geometry=gpd.points_from_xy(xx.ravel(), yy.ravel()),
+                           crs="EPSG:4326")
+
+    def cells(df):
+        return gpd.GeoSeries([box(x - dx / 2, y - dy / 2, x + dx / 2, y + dy / 2)
+                              for x, y in zip(df["x"], df["y"])], crs="EPSG:4326")
+
+    eez = gpd.read_file(offshore_file).to_crs("EPSG:4326")
+    shapes = gpd.read_file(geo_file).to_crs("EPSG:4326") if geo_file is not None else None
+
+    if zones is not None:
+        z = _load_vector(zones).to_crs("EPSG:4326")
+        zb = z.total_bounds
+        cand = pts.cx[zb[0] - dx:zb[2] + dx, zb[1] - dy:zb[3] + dy]
+        cand = gpd.GeoDataFrame(cand[["x", "y"]], geometry=cells(cand).values, crs="EPSG:4326")
+        avail = cand.loc[gpd.sjoin(cand, z[["geometry"]], predicate="intersects").index.unique()]
+    else:
+        sea = gpd.sjoin(pts, eez[["geometry"]], how="inner", predicate="within")
+        sea = sea[~sea.index.duplicated()][["x", "y", "geometry"]]
+        if shapes is not None:
+            on_land = gpd.sjoin(sea, shapes[["geometry"]], how="inner", predicate="within")
+            sea = sea.drop(on_land.index.unique())
+        sea["depth"] = _sample_depth(bathymetry_file, sea["x"].values, sea["y"].values)
+        sea = sea[(sea["depth"] > 0) & (sea["depth"] <= floating_max)]
+        avail = gpd.GeoDataFrame(sea[["x", "y"]], geometry=cells(sea).values, crs="EPSG:4326")
+
+    # share of the EEZ outside the cutout
+    acrs = equal_area_crs(eez)
+    eez_area = eez.to_crs(acrs).area.sum()
+    inside = eez.clip(box(gx.min() - dx / 2, gy.min() - dy / 2,
+                          gx.max() + dx / 2, gy.max() + dy / 2)).to_crs(acrs).area.sum()
+    outside = 1 - inside / eez_area
+
+    if extent is None:
+        e = eez.total_bounds
+        extent = (min(minx, e[0]) - 0.5, min(miny, e[1]) - 0.5,
+                  max(maxx, e[2]) + 0.5, max(maxy, e[3]) + 0.5)
+    x0, y0, x1, y1 = extent
+
+    # depth bands: the class limits plus a few for the open ocean
+    bounds = sorted({0, shallow_max, transitional_max, 200, 500, floating_max, 2000, 4000})
+    ramp = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7",
+            "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281"]
+    n = len(bounds) - 1
+    cmap = ListedColormap([ramp[i] for i in np.linspace(0, len(ramp) - 1, n).round().astype(int)])
+    cmap.set_over("#0d366b")
+    norm = BoundaryNorm(bounds, n)
+
+    fig, ax = plt.subplots(figsize=(size, size))
+    ax.set_facecolor("#fcfcfb")
+    land = gpd.read_file(shpreader.natural_earth(resolution="110m", category="cultural",
+                                                 name="admin_0_countries"))
+    land.plot(ax=ax, color="#e6e4df", edgecolor="none", zorder=1)
+
+    with xr.open_dataset(bathymetry_file) as bds:
+        zname, latname, lonname = _bathymetry_names(bds)
+        elev = bds[zname].transpose(latname, lonname)
+        lat = elev[latname].values
+        blon = elev[lonname].values
+        res = abs(blon[1] - blon[0])
+        gap = (blon.min() - res > x0 or blon.max() + res < x1 or
+               lat.min() - res > y0 or lat.max() + res < y1)
+        elev = elev.sel(**{latname: slice(y0, y1) if lat[0] < lat[-1] else slice(y1, y0),
+                           lonname: slice(x0, x1)})
+        step = max(1, int(np.ceil(max(elev.shape) / 1500)))
+        elev = elev[::step, ::step].load()
+    depth = -elev.values.astype(float)
+    lon, lat = elev[lonname].values, elev[latname].values
+    # EEZ mask on the bathymetry grid: full colour inside, faded outside
+    h, w = depth.shape
+    hx, hy = (lon.max() - lon.min()) / max(w - 1, 1) / 2, (lat.max() - lat.min()) / max(h - 1, 1) / 2
+    in_eez = features.geometry_mask(
+        eez.geometry, (h, w),
+        from_bounds(lon.min() - hx, lat.min() - hy, lon.max() + hx, lat.max() + hy, w, h),
+        invert=True)
+    if lat[0] < lat[-1]:
+        in_eez = in_eez[::-1]
+    sea = depth > 0
+    mesh = ax.pcolormesh(lon, lat, np.ma.masked_where(~(sea & in_eez), depth), cmap=cmap,
+                         norm=norm, shading="nearest", zorder=2, rasterized=True)
+    ax.pcolormesh(lon, lat, np.ma.masked_where(~(sea & ~in_eez), depth), cmap=cmap,
+                  norm=norm, shading="nearest", alpha=0.35, zorder=2, rasterized=True)
+
+    if shapes is not None:
+        shapes.cx[x0:x1, y0:y1].boundary.plot(ax=ax, color="#8a8984", linewidth=0.4, zorder=3)
+    if zones is not None:
+        z.plot(ax=ax, color="#eb6834", edgecolor="none", zorder=5)
+        avail.plot(ax=ax, facecolor="none", edgecolor="#0b0b0b", linewidth=0.6, zorder=6)
+        handles = [Patch(color="#eb6834", label="offshore zones"),
+                   Patch(facecolor="none", edgecolor="#0b0b0b",
+                         label=f"cells overlapping a zone ({len(avail)})")]
+        what = f"{len(avail)} cells overlap the offshore zones"
+    else:
+        avail.plot(ax=ax, facecolor="none", edgecolor="#eb6834", linewidth=0.5, zorder=5)
+        handles = [Patch(facecolor="none", edgecolor="#eb6834",
+                         label=f"available cells ({len(avail)})")]
+        what = f"{len(avail)} available cells (in the EEZ, 0-{floating_max} m deep)"
+    ax.add_patch(Rectangle((gx.min() - dx / 2, gy.min() - dy / 2),
+                           gx.max() - gx.min() + dx, gy.max() - gy.min() + dy,
+                           facecolor="none", edgecolor="#0b0b0b", linewidth=1.2,
+                           linestyle="--", zorder=7))
+    handles = [Patch(color="#3987e5", label="EEZ (faded outside)"),
+               Line2D([], [], color="#0b0b0b", linewidth=1.2, linestyle="--",
+                      label=f"cutout extent ({len(gx)} x {len(gy)} cells)")] + handles
+    if gap:
+        handles.append(Patch(facecolor="#fcfcfb", edgecolor="#8a8984", linewidth=0.5,
+                             label="no bathymetry data"))
+    ax.legend(handles=handles, loc="lower left", fontsize=8, framealpha=0.9)
+
+    cb = fig.colorbar(mesh, ax=ax, extend="max", ticks=bounds, shrink=0.6, pad=0.02)
+    cb.set_label("water depth [m]", fontsize=8)
+    cb.ax.tick_params(labelsize=8)
+
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    ax.set_aspect(1 / np.cos(np.deg2rad((y0 + y1) / 2)))
+    ax.tick_params(labelsize=8, colors="#52514e")
+    ax.set_xlabel("lon", fontsize=8); ax.set_ylabel("lat", fontsize=8)
+    sub = textwrap.fill(
+        f"Cutout {len(gx)} x {len(gy)} cells at {dx} x {dy} deg; {outside:.0%} of the EEZ "
+        f"lies outside it. {what[0].upper() + what[1:]}. Depth classes: shallow <= "
+        f"{shallow_max} m, transitional <= {transitional_max} m, deep (floating) <= "
+        f"{floating_max} m.", width=int(size * 11))
+    ax.set_title("Offshore: water depth, EEZ and available cells", loc="left",
+                 fontsize=11, pad=8 + 11 * (sub.count("\n") + 1))
+    ax.text(0, 1.01, sub, transform=ax.transAxes, fontsize=8, color="#52514e",
+            va="bottom")
+
+    print(f"cutout: {len(gx)} x {len(gy)} cells at {dx} x {dy} deg")
+    print(f"offshore: {what}")
+    if outside > 0.005:
+        print(f"Note: {outside:.0%} of the EEZ area lies outside the cutout and gets no cells")
     return ax
 
 

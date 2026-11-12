@@ -45,7 +45,7 @@ Two coordinate workflows, auto-selected by `get_coords` from the geo_file column
 ## Typical pipeline (per notebook)
 
 1. Set turbines/panel, `geo_file`, `offshore_file`, `bathymetry_file`, `timeframe`, `filename`, `regions`, `dx_step`/`dy_step`.
-2. `estimate_cutout_size(...)` — print grid size BEFORE downloading.
+2. `estimate_cutout_size(...)` — print grid size BEFORE downloading. `plot_offshore_bathymetry(offshore_file, bathymetry_file, <same extent args>, zones=)` maps depth (faded outside the EEZ), the cutout box and the offshore cells (or zone cells) from files alone; `extent=` zooms.
 3. `get_cutout(...)` — download/prepare the ERA5 cutout (cached; see resilience below).
 4. `get_coords(...)` → `coords_onshore`, `coords_offshore`.
 5. Capacity factors: `pv_capacity_factors`, `wind_onshore_capacity_factors`, `wind_offshore_capacity_factors`, `temperature_timeseries`.
@@ -74,7 +74,8 @@ PowerShell). Smaller cutouts also avoid it. See the auto-memory note
 - `make_rooftop_excluder(raster, developed_codes, ...)` — rooftop proxy (keeps only built-up classes via `invert=True`).
 - `calculate_potentials_per_region(...)` — **memory-safe**: processes one region at a time so atlite only rasterizes the land-cover raster over a single region's bbox (the whole-extent rasterization is what exhausts RAM at 30 m). Writes per-region + combined CSVs, returns `(combined_df, stitched_land, stitched_rooftop, coords_onshore_usable, coords_rooftop_usable, coords_offshore_usable)`. Stitched availability maps with area-weighted headline %.
 - `calculate_capacity_potentials(...)` — single-pass version (all regions at once; can exhaust RAM on big extents).
-- `calculate_offshore_potentials(...)` — offshore wind per region + depth class, reuses EEZ+depth `coords_offshore`.
+- `calculate_offshore_potentials(...)` — offshore wind per region + depth class, reuses EEZ+depth `coords_offshore`. If the coords carry an `availability` column (zone mode) only that share of each cell counts.
+- `offshore_zone_coords(cutout, zones, coords_onshore, bathymetry_file=, share_col=, threshold=)` — **zone mode**: offshore cells from designated zone polygons instead of the whole EEZ. Each overlapped grid cell gets `availability` = zone area in the cell / cell area (× the zone's `share_col`); depth is sampled inside the zone part, not at the cell centre (a coastal cell centre can sit hundreds of metres deeper than the zone); cells whose centre is on land still count. Pass the result on as `coords_offshore`. India uses it (`offshore_zones` in the notebook, `build_offshore_zones_india.py`): Tamil Nadu lease sites 1-14 + Gujarat B3 from the MNRE 2023 strategy's coordinates, Gujarat zones A/B/D/E/F digitized from its Fig. 2 and scaled (`share`) to NIWE's ~36 GW; ~54 GW at 4.5 MW/km², with `offshore_percent_available = 1.0`. Whole-EEZ potentials (~210 GW) and averaged profiles were far off the actual pipeline.
 - `usable_onshore_coords` / `usable_offshore_coords` — filter cutout cells to developable sites, feed into the CF functions for "usable sites only" timeseries.
 - `plot_offshore_map`, `equal_area_crs`.
 
@@ -148,9 +149,10 @@ output/
   takes the combined files, never `tiles/`. Missing files are warned, not fatal.
   `run_info={...}` is copied into the manifest as is (e.g. turbines, panel, cutout).
 - **Turbine variants without a new download:** give the outputs a new `filename`
-  (e.g. `india_nrel`) but call `get_cutout` with the original name, so the variant
-  reuses the existing cutout and never overwrites the base run's outputs. The India
-  NREL packages (2020 ATB 4 MW onshore, 15 MW offshore) were built this way.
+  (e.g. `india_nrel`) but call `get_cutout` with the original name (the IN notebook's
+  `cutout_name`), so the variant reuses the existing cutout and never overwrites the
+  base run's outputs. The India NREL packages (2020 ATB 4 MW onshore, 15 MW offshore)
+  were built this way.
 - **Heat-pump "COP" files hold the inverse Carnot COP**, `(T_supply - T)/T_supply` at
   55 degC supply (values ~0.04-0.2), not a COP; the manifest says so.
 - `migrate_output_layout.py [--dry-run] [output_root]` moves an old-layout `output/`
