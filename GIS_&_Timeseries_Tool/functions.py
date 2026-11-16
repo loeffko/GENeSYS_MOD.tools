@@ -42,7 +42,10 @@ def _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_
 
     Onshore cells are the cutout cells inside a region polygon. Offshore cells
     are cells inside the EEZ (offshore_file) but outside every region polygon,
-    each assigned to the nearest onshore region. Cells are pre-filtered to the
+    each assigned to the region named in the EEZ file's 'region' column when it has
+    one (cells of regions outside the run are dropped), else to the nearest onshore
+    region. A hub EEZ spanning several countries needs that column, or a tile also
+    claims its neighbours' sea (and counts it twice). Cells are pre-filtered to the
     region+EEZ bounding box first so this stays fast at finer resolutions.
 
     If bathymetry_file is given, each offshore cell also gets a 'depth' column
@@ -63,7 +66,10 @@ def _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_
     minx, miny, maxx, maxy = gdf_polygons.total_bounds
     eez = None
     if offshore_file is not None:
-        eez = gpd.read_file(offshore_file).to_crs("EPSG:4326")[["geometry"]]
+        eez = gpd.read_file(offshore_file).to_crs("EPSG:4326")
+        # an EEZ 'region' column names the region that owns each polygon (see
+        # _assign_offshore_region); without it every cell goes to the nearest region
+        eez = eez[["region", "geometry"]] if "region" in eez.columns else eez[["geometry"]]
         ex = eez.total_bounds
         minx, miny = min(minx, ex[0]), min(miny, ex[1])
         maxx, maxy = max(maxx, ex[2]), max(maxy, ex[3])
@@ -87,20 +93,18 @@ def _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_
     tagged = gpd.sjoin(pts, gdf_polygons[["_rid", "geometry"]], how="left", predicate="within")
     sea = tagged[tagged["_rid"].isna()][["x", "y", "geometry"]].drop_duplicates(subset=["x", "y"])
     sea = gpd.sjoin(sea, eez, how="inner", predicate="within").drop_duplicates(subset=["x", "y"])
-    coords_offshore = sea[["x", "y"]].reset_index(drop=True)
+    coords_offshore = sea[["x", "y"] + (["region"] if "region" in sea.columns else [])]
+    coords_offshore = coords_offshore.rename(columns={"region": "owner"}).reset_index(drop=True)
 
     if coords_offshore.empty or coords_onshore.empty:
         print("Warning: No offshore coordinates in the selected cutout")
         return coords_onshore, empty_offshore
 
     coords_offshore["coords"] = coords_offshore["y"].astype(str) + ", " + coords_offshore["x"].astype(str)
-
-    # assign each offshore cell to the nearest onshore region (distance in nm).
-    # haversine expects [lat, lon] == [y, x]; distance = arc * earth_radius_km / km_per_nm
-    tree = BallTree(np.deg2rad(coords_onshore[["y", "x"]].values), metric="haversine")
-    distances, index = tree.query(np.deg2rad(coords_offshore[["y", "x"]].values))
-    coords_offshore["region"] = coords_onshore["region"].values[index.flatten()]
-    coords_offshore["distance"] = distances.flatten() * 6371.0 / 1.852
+    coords_offshore = _assign_offshore_region(coords_offshore, coords_onshore, owner_col="owner")
+    if coords_offshore.empty:
+        print("Warning: No offshore coordinates of the selected regions in the cutout")
+        return coords_onshore, empty_offshore
 
     out_cols = ["x", "y", "coords", "region", "distance"]
     if bathymetry_file is not None:
@@ -109,6 +113,50 @@ def _get_coords_custom(cutout, regions, gdf_polygons, offshore_file, bathymetry_
         out_cols.append("depth")
 
     return coords_onshore, coords_offshore[out_cols]
+
+
+def _assign_offshore_region(df, coords_onshore, owner_col=None):
+    """Region and distance (nm) to the region's coast for offshore cells.
+
+    df has x, y. Where `owner_col` holds a value (the region owning the EEZ polygon
+    or zone, e.g. the country of a hub EEZ), the cell keeps that region, and is
+    dropped when that region is not among coords_onshore's regions (another tile's
+    or country's sea, which would otherwise be counted twice). Cells without an
+    owner go to the nearest onshore region. Distance is measured to the nearest
+    onshore cell of the assigned region.
+    """
+    df = df.copy().reset_index(drop=True)
+    present = set(coords_onshore["region"])
+    owner = (df[owner_col] if owner_col and owner_col in df.columns
+             else pd.Series([None] * len(df), index=df.index))
+    owned = owner.notna()
+    keep = ~owned | owner.isin(present)
+    if (~keep).any():
+        print(f"offshore: dropped {int((~keep).sum())} cells of regions outside this run "
+              f"({sorted(set(owner[~keep]))})")
+    df, owner, owned = df[keep], owner[keep], owned[keep]
+
+    # haversine expects [lat, lon] == [y, x]; distance = arc * earth_radius_km / km_per_nm
+    def _nearest(points, ons):
+        tree = BallTree(np.deg2rad(ons[["y", "x"]].values), metric="haversine")
+        d, i = tree.query(np.deg2rad(points[["y", "x"]].values))
+        return ons["region"].values[i.flatten()], d.flatten() * 6371.0 / 1.852
+
+    df["region"] = None
+    df["distance"] = np.nan
+    free = df.index[~owned]
+    if len(free):
+        r, d = _nearest(df.loc[free], coords_onshore)
+        df.loc[free, "region"] = r
+        df.loc[free, "distance"] = d
+    for reg in owner[owned].unique():
+        idx = df.index[owned & (owner == reg)]
+        _, d = _nearest(df.loc[idx], coords_onshore[coords_onshore["region"] == reg])
+        df.loc[idx, "region"] = reg
+        df.loc[idx, "distance"] = d
+    if owner_col and owner_col in df.columns:
+        df = df.drop(columns=owner_col)
+    return df.reset_index(drop=True)
 
 
 def _sample_depth(bathymetry_file, lon, lat):
@@ -323,9 +371,16 @@ def pivot_and_categorize(
             df_transitional.to_csv(output_dir + '/' + timeframe + '_' + filename + '_wind_offshore_transitional_raw.csv', index=True)
             df_deep.to_csv(output_dir + '/' + timeframe + '_' + filename + '_wind_offshore_deep_raw.csv', index=True)
 
-        df_shallow = pd.pivot_table(df_shallow, values='capacity_factor', index='time', columns='region',aggfunc=np.mean).copy()
-        df_transitional = pd.pivot_table(df_transitional, values='capacity_factor', index='time', columns='region',aggfunc=np.mean).copy()
-        df_deep = pd.pivot_table(df_deep, values='capacity_factor', index='time', columns='region', aggfunc=np.mean).copy()
+        def _profile(d):
+            if 'weight' not in d.columns:
+                return pd.pivot_table(d, values='capacity_factor', index='time', columns='region', aggfunc=np.mean).copy()
+            d = d.assign(_cw=d['capacity_factor'] * d['weight'])
+            g = d.groupby(['time', 'region'])[['_cw', 'weight']].sum()
+            return (g['_cw'] / g['weight']).round(4).unstack('region')
+
+        df_shallow = _profile(df_shallow)
+        df_transitional = _profile(df_transitional)
+        df_deep = _profile(df_deep)
 
         if write_raw_data == True:
             wnd100 = df[df['distance'] < 180]
@@ -795,6 +850,11 @@ def wind_offshore_capacity_factors(
     keep = ['time', 'coords', 'capacity_factor', 'distance', 'region']
     if 'depth' in wnd100.columns:
         keep.insert(4, 'depth')
+    # calibrated sites (calibrate_offshore_sites) carry their capacity: the regional
+    # profile is then the capacity-weighted mean, not the plain mean over cells
+    if 'capacity_gw' in wnd100.columns:
+        wnd100['weight'] = wnd100['capacity_gw'].astype(float)
+        keep.append('weight')
     wnd100 = wnd100[keep]
 
     df_shallow, df_transitional, df_deep = pivot_and_categorize(wnd100, tech='wind_offshore', timeframe=timeframe, filename=filename,write_raw_data=write_raw_data,output_dir=output_dir)
@@ -1714,8 +1774,13 @@ def calculate_offshore_potentials(cutout, coords_offshore,
     df["_cap"] = [ _lookup(offshore_cap_per_sqkm, c) for c in classes ]
     df["_pct"] = [ _lookup(offshore_percent_available, c) for c in classes ]
 
-    df["Suitable Area Offshore [km²]"] = df["Area [km²]"] * df["_pct"]
-    df["Offshore Wind Capacity [GW]"] = df["Area [km²]"] * df["_cap"] * df["_pct"] / 1000
+    if "capacity_gw" in df.columns:
+        # calibrated sites (calibrate_offshore_sites) carry their own capacity
+        df["Offshore Wind Capacity [GW]"] = df["capacity_gw"].astype(float)
+        df["Suitable Area Offshore [km²]"] = df["capacity_gw"] * 1000 / df["_cap"]
+    else:
+        df["Suitable Area Offshore [km²]"] = df["Area [km²]"] * df["_pct"]
+        df["Offshore Wind Capacity [GW]"] = df["Area [km²]"] * df["_cap"] * df["_pct"] / 1000
 
     return df.groupby(["region", "depth_class"], observed=True)[
         ["Area [km²]", "Suitable Area Offshore [km²]", "Offshore Wind Capacity [GW]"]
@@ -1769,7 +1834,10 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
                                     add_category=True, pv_solar_panel=None, wind_turbine=None,
                                     pv_slope=36.7, pv_azimuth=180, optimal_tilt=False,
                                     rooftop_shares=None, potentials_dir=None, coords_dir=None,
-                                    return_wind_coords=False):
+                                    return_wind_coords=False,
+                                    offshore_zone_coords=None, offshore_targets=None,
+                                    offshore_zone_percent_available=1.0,
+                                    offshore_headroom=2.0):
     """Memory-safe per-region GIS potentials with a stitched availability map.
 
     Processes one region at a time so atlite only ever rasterizes the land-cover
@@ -1803,6 +1871,14 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
     both default to the year-agnostic folders next to output_dir (output_subdir).
     The offshore columns of the combined table use the usable offshore sites
     (depth AND offshore exclusions), like the onshore columns.
+
+    Offshore zones and targets: with `offshore_zone_coords` (offshore_zone_coords
+    output for designated zones) and/or `offshore_targets` (load_offshore_targets),
+    the usable offshore sites are sized per region by calibrate_offshore_sites:
+    zones first, the rest on EEZ cells, totalling the 2050 target or
+    `offshore_headroom` x the latest target / zone capacity. Zone cells get the depth
+    filter but not the offshore exclusions (they are designated areas). The per-region
+    result is written to {filename}_offshore_calibration.csv in potentials_dir.
     """
     shapes_all, names = get_region_shapes(geo_file, regions, region_col=region_col)
     os.makedirs(output_dir, exist_ok=True)
@@ -1894,11 +1970,26 @@ def calculate_potentials_per_region(cutout, geo_file, coords_onshore,
     # Buildable offshore sites: depth-classed cells minus the offshore exclusions
     # (e.g. marine protected areas). 'category' = depth_class, its natural site class.
     coords_offshore_usable = None
-    if coords_offshore is not None:
-        coords_offshore_usable = usable_offshore_coords(
-            coords_offshore, exclude_files=offshore_exclude_files,
-            exclude_layer=offshore_exclude_layer, exclude_query=offshore_exclude_query,
-            exclude_buffer=offshore_exclude_buffer)
+    has_zones = offshore_zone_coords is not None and len(offshore_zone_coords) > 0
+    calib_csv = os.path.join(potentials_dir, f"{filename}_offshore_calibration.csv")
+    if os.path.exists(calib_csv):
+        os.remove(calib_csv)          # never leave a previous run's table behind
+    if coords_offshore is not None or has_zones:
+        if coords_offshore is not None and len(coords_offshore):
+            coords_offshore_usable = usable_offshore_coords(
+                coords_offshore, exclude_files=offshore_exclude_files,
+                exclude_layer=offshore_exclude_layer, exclude_query=offshore_exclude_query,
+                exclude_buffer=offshore_exclude_buffer)
+        if has_zones or offshore_targets:
+            zones_usable = usable_offshore_coords(offshore_zone_coords) if has_zones else None
+            coords_offshore_usable, _calib = calibrate_offshore_sites(
+                cutout, coords_offshore_usable, zones_usable, offshore_targets,
+                cap_per_sqkm=offshore_cap_per_sqkm, percent_available=offshore_percent_available,
+                zone_percent_available=offshore_zone_percent_available,
+                headroom=offshore_headroom, area_crs=area_crs)
+            _calib.to_csv(calib_csv, index=False)
+        if coords_offshore_usable is None:
+            coords_offshore_usable = pd.DataFrame(columns=["x", "y", "coords", "region"])
         if "depth_class" in coords_offshore_usable.columns:
             coords_offshore_usable["category"] = coords_offshore_usable["depth_class"]
 
@@ -2050,6 +2141,9 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                       offshore_cap_per_sqkm=5, offshore_percent_available=0.1,
                       offshore_exclude_files=None, offshore_exclude_layer=None,
                       offshore_exclude_query=None, offshore_exclude_buffer=0,
+                      offshore_zones=None, offshore_zones_share_col=None,
+                      offshore_targets=None, offshore_zone_percent_available=1.0,
+                      offshore_headroom=2.0,
                       usable_threshold=0.01, usable_threshold_rooftop=None, usable_round_to=2,
                       run_pv=True, run_wind_onshore=True, run_wind_offshore=True,
                       run_temperature=True, run_potentials=True, full_area_cf=True,
@@ -2113,7 +2207,15 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                                  offshore_file to None to force a tile landlocked).
       - offshore_exclude_files / _layer / _query / _buffer : offshore exclusion for
                                  this tile's potentials.
+      - offshore_zones         : this tile's designated offshore zones (None = none).
     Per-tile excluders are built lazily inside the loop and freed with the cutout.
+
+    Offshore zones and targets: `offshore_zones` (a vector file of designated zones,
+    ideally with a 'region' column) and `offshore_targets` (load_offshore_targets) size
+    each region's usable offshore sites via calibrate_offshore_sites (see
+    calculate_potentials_per_region); the usable offshore profiles are then weighted
+    by the sited capacity. Each tile writes {tile file}_offshore_calibration.csv and
+    the combined {filename}_offshore_calibration.csv lists all regions.
 
     Rooftop PV: when potentials run, each tile's rooftop cells also get one CF
     series per `rooftop_segments` entry (default ROOFTOP_SEGMENTS), combined as
@@ -2316,6 +2418,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
 
         # --- GIS potentials (memory-safe per region inside) ---
         if run_potentials and tile_excluder is not None and tile_cities is not None:
+            tile_zones = spec["offshore_zones"] if "offshore_zones" in spec else offshore_zones
+            zone_coords = None
+            if tile_zones is not None and tile_offshore is not None:
+                zone_coords = offshore_zone_coords(
+                    cutout, tile_zones, coords_onshore, bathymetry_file=tile_bathymetry,
+                    share_col=offshore_zones_share_col, area_crs=tile_area_crs)
             (combined_df, stitch_land, stitch_roof,
              _con_u, _crf_u, _coff_u, _cwind_u) = calculate_potentials_per_region(
                 cutout, geo_file, coords_onshore, tile_excluder, tile_cities,
@@ -2339,6 +2447,9 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
                 pv_solar_panel=solar_panel, wind_turbine=onshore_turbine,
                 pv_slope=pv_slope, pv_azimuth=pv_azimuth, optimal_tilt=optimal_tilt,
                 rooftop_shares=rooftop_shares, return_wind_coords=True,
+                offshore_zone_coords=zone_coords, offshore_targets=offshore_targets,
+                offshore_zone_percent_available=offshore_zone_percent_available,
+                offshore_headroom=offshore_headroom,
                 plot=plot, verbose=verbose, color=color)
             potentials_parts.append(combined_df)
             # usable-site profiles: PV on the PV land set, onshore wind on its own
@@ -2411,6 +2522,12 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
             potentials_combined[_off_cols] = potentials_combined[_off_cols].fillna(0)
         potentials_combined.to_csv(
             os.path.join(potentials_dir, f"{filename}_potentials_combined.csv"), index=False)
+        calib = [os.path.join(tile_potentials_dir, f"{filename}_{t}_offshore_calibration.csv")
+                 for t in tiles_run]
+        calib = [pd.read_csv(p) for p in calib if os.path.exists(p)]
+        if calib:
+            pd.concat(calib, ignore_index=True).to_csv(
+                os.path.join(potentials_dir, f"{filename}_offshore_calibration.csv"), index=False)
 
     print(f"\nBatch done: {len(tiles_run)} tiles run, {len(tiles_skipped)} skipped. "
           f"Combined CSVs written under base filename '{filename}'.")
@@ -2588,35 +2705,45 @@ def offshore_zone_coords(cutout, zones, coords_onshore, bathymetry_file=None,
     `share_col` value if given (e.g. the usable share of a coarse zone outline).
     calculate_offshore_potentials then counts only that part of the cell. Cells are
     taken from the grid, so zones in narrow bays whose cell centre lies on land
-    still count. Region = region of the nearest onshore cell and distance in nm, as
-    in get_coords; depth is sampled inside the zone part of the cell, not at the
-    cell centre. Zones must not overlap. Cells below `threshold` are dropped.
+    still count. Region = the zone's 'region' column when the zones file has one
+    (zones of regions outside the run are dropped), else the region of the nearest
+    onshore cell; distance in nm, as in get_coords. Depth is sampled inside the zone
+    part of the cell, not at the cell centre. Zones must not overlap. Cells below
+    `threshold` are dropped.
 
     Returns get_coords' offshore columns plus 'availability'; use it as
-    coords_offshore for the rest of the pipeline.
+    coords_offshore for the rest of the pipeline, or pass it as the zones of
+    calibrate_offshore_sites (offshore_zone_coords= in the potentials functions).
     """
+    empty = pd.DataFrame(columns=["x", "y", "coords", "region", "distance", "availability"])
     crs = area_crs or equal_area_crs(cutout.grid)
     grid = cutout.grid[["x", "y", "geometry"]].to_crs(crs)
     z = _load_vector(zones, layer=zones_layer, query=zones_query).to_crs(crs)
     z["_w"] = z[share_col].astype(float) if share_col else 1.0
-    parts = gpd.overlay(grid, z[["_w", "geometry"]], how="intersection", keep_geom_type=True)
+    z["_owner"] = z["region"] if "region" in z.columns else None
+    if "region" in z.columns:
+        z = z[z["_owner"].isin(set(coords_onshore["region"]))]
+    if z.empty:
+        print("Note: no offshore zones for the regions of this run")
+        return empty
+    parts = gpd.overlay(grid, z[["_w", "_owner", "geometry"]], how="intersection",
+                        keep_geom_type=True)
     if parts.empty:
         print("Warning: no cutout cell overlaps the offshore zones")
-        return pd.DataFrame(columns=["x", "y", "coords", "region", "distance", "availability"])
+        return empty
     parts["_a"] = parts.area * parts["_w"]
+    parts["_owner"] = parts["_owner"].astype(object).where(parts["_owner"].notna(), "")
     cell_area = grid.set_index(["x", "y"]).area
-    df = parts.groupby(["x", "y"], as_index=False)["_a"].sum()
+    df = parts.groupby(["x", "y", "_owner"], as_index=False)["_a"].sum()
     df["availability"] = df["_a"].values / cell_area.loc[list(zip(df["x"], df["y"]))].values
     df = df[df["availability"] >= threshold].drop(columns="_a").reset_index(drop=True)
+    df["_owner"] = df["_owner"].where(df["_owner"] != "", None)
 
     df["coords"] = df["y"].astype(str) + ", " + df["x"].astype(str)
-    tree = BallTree(np.deg2rad(coords_onshore[["y", "x"]].values), metric="haversine")
-    dist, idx = tree.query(np.deg2rad(df[["y", "x"]].values))
-    df["region"] = coords_onshore["region"].values[idx.flatten()]
-    df["distance"] = dist.flatten() * 6371.0 / 1.852
+    df = _assign_offshore_region(df, coords_onshore, owner_col="_owner")
     cols = ["x", "y", "coords", "region", "distance"]
-    if bathymetry_file is not None:
-        # a point inside the largest zone part of each cell
+    if bathymetry_file is not None and not df.empty:
+        # a point inside the largest zone part of each cell (per owning region)
         big = parts.loc[parts.groupby(["x", "y"])["_a"].idxmax()].set_index(["x", "y"])
         pts = big.geometry.representative_point().to_crs("EPSG:4326")
         pts = pts.loc[list(zip(df["x"], df["y"]))]
@@ -2626,16 +2753,226 @@ def offshore_zone_coords(cutout, zones, coords_onshore, bathymetry_file=None,
     return df[cols + ["availability"]]
 
 
+def _offshore_target(spec):
+    """(gw, basis) from an offshore_targets entry: a number (a 2050 target) or a
+    dict {'gw': .., 'basis': '2050' | 'latest'}; (None, None) for no target."""
+    if spec is None:
+        return None, None
+    if isinstance(spec, dict):
+        gw = spec.get("gw")
+        if gw is None or pd.isna(gw):
+            return None, None
+        return float(gw), str(spec.get("basis", "2050"))
+    return float(spec), "2050"
+
+
+def calibrate_offshore_sites(cutout, coords_eez, coords_zones=None, targets=None,
+                             cap_per_sqkm=5, percent_available=0.1,
+                             zone_percent_available=1.0, headroom=2.0, area_crs=None):
+    """Size each region's offshore sites to a capacity target, zones first.
+
+    coords_eez   : usable EEZ cells (usable_offshore_coords output, with depth_class).
+    coords_zones : usable designated-zone cells (offshore_zone_coords, then the depth
+                   filter), 'availability' = zone share of the cell. Optional.
+    targets      : {region: target}; a target is a number (a 2050 target in GW) or
+                   {'gw': .., 'basis': '2050' | 'latest'} ('latest' = the latest
+                   official target before 2050). load_offshore_targets builds it.
+
+    Per region, the potential T is
+      - the 2050 target, where there is one;
+      - else max(`headroom` x latest target, zone capacity);
+      - else, with zones but no target, `headroom` x zone capacity;
+      - else unchanged: the whole-EEZ potential (cell area x percent_available).
+    Zone capacity = zone area x cap_per_sqkm x zone_percent_available. If T is below
+    it, every zone is scaled down by T / zone capacity. Otherwise the zones are used
+    in full and the rest goes to the EEZ cells outside the zones, in proportion to
+    their whole-EEZ potential and at most each cell's free area x cap_per_sqkm. A
+    target above even that is capped, with a warning.
+
+    Returns (sites, summary). sites: one row per (cell, source) with 'source'
+    ('zone' / 'eez'), 'capacity_gw' and 'availability' (share of the cell used);
+    calculate_offshore_potentials sums 'capacity_gw' and the offshore profiles are
+    weighted by it. A cell can have a zone row and an eez row. summary: one row per
+    region with the target, zone and EEZ capacity, and the result.
+    """
+    targets = targets or {}
+    area = (cutout.grid.set_index(["y", "x"])
+            .to_crs(area_crs or equal_area_crs(cutout.grid)).area / 1e6).rename("_area")
+
+    def _lookup(value, c):
+        return value.get(c, 0) if isinstance(value, dict) else value
+
+    def _prep(df):
+        if df is None or len(df) == 0:
+            return None
+        df = df.merge(area.reset_index(), on=["y", "x"], how="inner").reset_index(drop=True)
+        if "depth_class" not in df.columns:
+            df["depth_class"] = "all"
+        df["_cap"] = [_lookup(cap_per_sqkm, str(c)) for c in df["depth_class"]]
+        df["_pct"] = [_lookup(percent_available, str(c)) for c in df["depth_class"]]
+        return df
+
+    eez = _prep(coords_eez)
+    zon = _prep(coords_zones)
+    regions = sorted(set(eez["region"] if eez is not None else [])
+                     | set(zon["region"] if zon is not None else []))
+    sites, rows = [], []
+    for reg in regions:
+        e = eez[eez["region"] == reg].copy() if eez is not None else None
+        z = zon[zon["region"] == reg].copy() if zon is not None else None
+        if z is not None and len(z):
+            z["capacity_gw"] = z["_area"] * z["availability"] * z["_cap"] * zone_percent_available / 1000
+            # zone share of each cell, so the EEZ headroom only uses the rest
+            zshare = z.groupby(["x", "y"])["availability"].sum()
+        else:
+            z, zshare = None, pd.Series(dtype=float)
+        Z = float(z["capacity_gw"].sum()) if z is not None else 0.0
+        if e is not None and len(e):
+            free = 1 - zshare.reindex(list(zip(e["x"], e["y"]))).fillna(0).clip(0, 1).values
+            e["_whole"] = e["_area"] * e["_cap"] * e["_pct"] * free / 1000
+            e["_max"] = e["_area"] * e["_cap"] * free / 1000
+        else:
+            e = None
+        E = float(e["_whole"].sum()) if e is not None else 0.0
+        Emax = float(e["_max"].sum()) if e is not None else 0.0
+
+        gw, basis = _offshore_target(targets.get(reg))
+        if basis == "2050":
+            T, rule = gw, "2050 target"
+        elif basis is not None:
+            T, rule = max(headroom * gw, Z), f"max({headroom:g} x latest target, zones)"
+        elif Z > 0:
+            T, rule = headroom * Z, f"{headroom:g} x zones"
+        else:
+            T, rule = E, "whole EEZ"
+
+        note = ""
+        if T <= Z and Z > 0:
+            z["capacity_gw"] *= T / Z
+            if e is not None:
+                e["capacity_gw"] = 0.0
+        else:
+            R = T - Z if rule != "whole EEZ" else E
+            if e is None or R <= 0:
+                if e is not None:
+                    e["capacity_gw"] = 0.0
+                if R > 1e-6:
+                    note = f"no EEZ cells for the remaining {R:.1f} GW"
+            elif rule == "whole EEZ":
+                e["capacity_gw"] = e["_whole"]
+            else:
+                if R > Emax:
+                    note = (f"target needs {R:.1f} GW beyond the zones but the free EEZ "
+                            f"holds {Emax:.1f} GW at {cap_per_sqkm} MW/km2; capped")
+                    R = Emax
+                # water-filling: share R in proportion to _whole, each cell at most _max
+                alloc = np.zeros(len(e))
+                w, cap_ = e["_whole"].values, e["_max"].values
+                open_ = w > 0
+                rem = R
+                for _ in range(len(e) + 1):
+                    if rem <= 1e-9 or not open_.any():
+                        break
+                    s = rem / w[open_].sum()
+                    trial = np.where(open_, alloc + s * w, alloc)
+                    over = open_ & (trial >= cap_)
+                    if not over.any():
+                        alloc = trial
+                        break
+                    alloc[over] = cap_[over]
+                    open_ &= ~over
+                    rem = R - alloc.sum()
+                e["capacity_gw"] = alloc
+        if note:
+            print(f"Warning ({reg}): {note}")
+
+        for df, src in ((z, "zone"), (e, "eez")):
+            if df is None:
+                continue
+            df = df[df["capacity_gw"] > 1e-9].copy()
+            df["source"] = src
+            df["availability"] = df["capacity_gw"] * 1000 / (df["_area"] * df["_cap"])
+            sites.append(df)
+        used = {s: float(d["capacity_gw"].sum()) for d, s in ((z, "zone"), (e, "eez"))
+                if d is not None}
+        rows.append({"region": reg, "rule": rule, "target_gw": gw,
+                     "target_basis": basis, "zones_gw": round(Z, 2),
+                     "whole_eez_gw": round(E, 2), "potential_gw": round(sum(used.values()), 2),
+                     "from_zones_gw": round(used.get("zone", 0), 2),
+                     "from_eez_gw": round(used.get("eez", 0), 2), "note": note})
+
+    drop = ["_area", "_cap", "_pct", "_whole", "_max"]
+    out = (pd.concat(sites, ignore_index=True).drop(columns=drop, errors="ignore")
+           if sites else pd.DataFrame(columns=list(coords_eez.columns if coords_eez is not None
+                                                   else []) + ["source", "capacity_gw"]))
+    summary = pd.DataFrame(rows)
+    if len(summary):
+        print(summary[["region", "rule", "target_gw", "zones_gw", "whole_eez_gw",
+                       "potential_gw"]].to_string(index=False))
+    return out, summary
+
+
+def load_offshore_targets(path="geodata/config/offshore_targets.csv", hub=None,
+                          regions=None, region_of=None):
+    """Offshore wind targets as calibrate_offshore_sites' `targets` dict.
+
+    The CSV has one row per code (a country, or a state for sub-national targets) with
+    target_2050_gw and latest_target_gw (+ year, source). A row with a 2050 target
+    gives {'gw': target_2050_gw, 'basis': '2050'}, else one with a latest target
+    {'gw': latest_target_gw, 'basis': 'latest'}; rows with neither are skipped.
+    The model region of a row is region_of[code] if given, else the CSV's 'region'
+    column, else the code itself (e.g. US states carry their RTO region). Targets of
+    one region are summed: '2050' when every row has a 2050 target, else 'latest'
+    with each row's latest-or-2050 figure. `hub` keeps the rows of that hub (codes
+    repeat across hubs: ME is Montenegro and Maine); `regions` keeps those regions.
+    """
+    t = pd.read_csv(path, comment="#")
+    if hub is not None and "hub" in t.columns:
+        t = t[t["hub"] == hub]
+    out = {}
+    for _, r in t.iterrows():
+        code = r["code"]
+        csv_reg = r.get("region")
+        reg = (region_of or {}).get(code, csv_reg if isinstance(csv_reg, str) and csv_reg else code)
+        if regions is not None and reg not in regions:
+            continue
+        t50, tl = r.get("target_2050_gw"), r.get("latest_target_gw")
+        if pd.notna(t50):
+            item = (float(t50), "2050")
+        elif pd.notna(tl):
+            item = (float(tl), "latest")
+        else:
+            continue
+        out.setdefault(reg, []).append(item)
+    res = {}
+    for reg, items in out.items():
+        bases = {b for _, b in items}
+        basis = "2050" if bases == {"2050"} else "latest"
+        res[reg] = {"gw": sum(g for g, _ in items), "basis": basis}
+    return res
+
+
+_DEPTH_COLORS = {"shallow": "#86b6ef", "transitional": "#2a78d6", "deep": "#104281"}
+_ZONE_COLOR = "#eb6834"      # designated zones (orange)
+_EEZ_CELL_COLOR = "#eda100"  # EEZ cells outside the zones (yellow, dashed)
+
+
 def plot_offshore_map(coords_offshore, shapes=None, offshore_file=None,
-                      color_by="depth_class", size=8, point_size=6):
+                      color_by="depth_class", size=8, point_size=6, zones=None):
     """Map the usable offshore cells, coloured by depth class (or region).
 
-    coords_offshore : offshore cells from get_coords / usable_offshore_coords
-                      (needs x, y and the color_by column).
+    coords_offshore : offshore cells from get_coords / usable_offshore_coords /
+                      calibrate_offshore_sites (needs x, y and the color_by column).
     shapes          : optional onshore region polygons to draw for context.
     offshore_file   : optional EEZ geojson to outline the offshore zone.
     color_by        : 'depth_class' (default) or 'region'.
+    zones           : optional designated-zone polygons, drawn filled in orange.
+    With a 'source' column (calibrated sites), cells sited in a designated zone are
+    filled markers and cells sited on the EEZ outside the zones hollow ones, sized by
+    their capacity.
     """
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
     df = coords_offshore.copy()
     if color_by == "depth_class" and "depth_class" not in df.columns and "depth" in df.columns:
         df = usable_offshore_coords(df)
@@ -2644,19 +2981,67 @@ def plot_offshore_map(coords_offshore, shapes=None, offshore_file=None,
                            crs="EPSG:4326")
 
     fig, ax = plt.subplots(figsize=(size, size))
+    handles = []
     if offshore_file is not None:
         gpd.read_file(offshore_file).to_crs("EPSG:4326").boundary.plot(
-            ax=ax, edgecolor="steelblue", linewidth=0.6)
+            ax=ax, edgecolor="#8a8984", linewidth=0.6, linestyle="--")
+        handles.append(Line2D([], [], color="#8a8984", linewidth=0.6, linestyle="--",
+                              label="EEZ boundary"))
     if shapes is not None:
         shapes.to_crs("EPSG:4326").boundary.plot(ax=ax, edgecolor="grey", linewidth=0.5)
+    if zones is not None:
+        _load_vector(zones).to_crs("EPSG:4326").plot(ax=ax, color=_ZONE_COLOR, alpha=0.35,
+                                                     edgecolor=_ZONE_COLOR, linewidth=0.6)
+        handles.append(Patch(facecolor=_ZONE_COLOR, alpha=0.35, edgecolor=_ZONE_COLOR,
+                             label="designated zones"))
 
-    if color_by in pts.columns:
-        for key, grp in pts.groupby(color_by, observed=True):
-            grp.plot(ax=ax, markersize=point_size, label=str(key))
-        ax.legend(title=color_by, fontsize=8)
+    has_src = "source" in pts.columns
+    if has_src and "capacity_gw" in pts.columns and len(pts):
+        c = pts["capacity_gw"].astype(float)
+        pts["_ms"] = point_size * (0.5 + 3.5 * (c / c.max()) ** 0.5)
     else:
-        pts.plot(ax=ax, markersize=point_size)
-    ax.set_title(f"Usable offshore cells by {color_by}")
+        pts["_ms"] = point_size
+    if color_by in pts.columns:
+        keys = ([k for k in _DEPTH_COLORS if k in set(pts[color_by].astype(str))]
+                if color_by == "depth_class"
+                else sorted(pts[color_by].dropna().astype(str).unique()))
+        for key in keys:
+            grp = pts[pts[color_by].astype(str) == key]
+            col = _DEPTH_COLORS.get(key) if color_by == "depth_class" else None
+            if has_src:
+                z, e = grp[grp["source"] == "zone"], grp[grp["source"] != "zone"]
+                if len(e):
+                    e.plot(ax=ax, markersize=e["_ms"], facecolor="none",
+                           edgecolor=col or "#52514e", linewidth=0.5, zorder=3)
+                if len(z):
+                    z.plot(ax=ax, markersize=z["_ms"], color=col, edgecolor="#0b0b0b",
+                           linewidth=0.3, zorder=4)
+            else:
+                grp.plot(ax=ax, markersize=grp["_ms"], color=col, zorder=4)
+            handles.append(Line2D([], [], marker="o", linestyle="", color=col or "#52514e",
+                                  label=str(key)))
+        if has_src:
+            handles += [Line2D([], [], marker="o", linestyle="", color="#52514e",
+                               label="sited in a zone (filled)"),
+                        Line2D([], [], marker="o", linestyle="", markerfacecolor="none",
+                               markeredgecolor="#52514e", label="sited on the EEZ (hollow)")]
+    else:
+        pts.plot(ax=ax, markersize=pts["_ms"])
+    if handles:
+        ax.legend(handles=handles, fontsize=8, loc="best")
+    if len(pts):
+        # frame the sites, not the whole EEZ (a hub EEZ reaches Greenland)
+        x0, y0, x1, y1 = pts.total_bounds
+        pad = max(1.0, 0.05 * max(x1 - x0, y1 - y0))
+        ax.set_xlim(x0 - pad, x1 + pad)
+        ax.set_ylim(y0 - pad, y1 + pad)
+        ax.set_aspect(1 / np.cos(np.deg2rad((y0 + y1) / 2)))
+    title = f"Usable offshore cells by {color_by}"
+    if has_src and "capacity_gw" in pts.columns:
+        zgw = pts.loc[pts["source"] == "zone", "capacity_gw"].sum()
+        egw = pts.loc[pts["source"] != "zone", "capacity_gw"].sum()
+        title += f"\n{zgw:.1f} GW in zones, {egw:.1f} GW on the EEZ (marker size ~ capacity)"
+    ax.set_title(title, fontsize=10)
     return ax
 
 
@@ -2664,7 +3049,8 @@ def plot_offshore_bathymetry(offshore_file, bathymetry_file, geo_file=None, regi
                              cutout_north_west=None, cutout_south_east=None,
                              dx=0.25, dy=0.25, zones=None, shallow_max=30,
                              transitional_max=60, floating_max=1000, extent=None,
-                             size=10, natural_earth_dataset="admin_0_map_units"):
+                             size=10, natural_earth_dataset="admin_0_map_units",
+                             show_eez_cells=True):
     """Map water depth, the EEZ and the offshore cells before the cutout is downloaded.
 
     Takes the same extent/resolution arguments as estimate_cutout_size. Sea is shaded
@@ -2672,9 +3058,12 @@ def plot_offshore_bathymetry(offshore_file, bathymetry_file, geo_file=None, regi
     EEZ (offshore_file). The dashed box is the
     cutout extent: EEZ waters outside it get no offshore cells. Available cells, drawn
     at cell size, are the cells get_coords + usable_offshore_coords keep (centre in the
-    EEZ and off the region polygons, 0 < depth <= floating_max). With `zones` (the
-    offshore_zone_coords input) the zones are drawn instead, with the cells they
-    overlap. `extent` = (minx, miny, maxx, maxy) zooms in; default: cutout + EEZ.
+    EEZ and off the region polygons, 0 < depth <= floating_max), outlined dashed in
+    yellow. With `zones` (the offshore_zone_coords input) the zones are drawn filled
+    in orange with the cells they overlap outlined solid; the yellow dashed EEZ cells
+    are then the ones outside the zones, where calibrate_offshore_sites puts any
+    capacity beyond the zones (show_eez_cells=False hides them). `extent` =
+    (minx, miny, maxx, maxy) zooms in; default: cutout + EEZ.
     """
     from matplotlib.colors import ListedColormap, BoundaryNorm
     from matplotlib.lines import Line2D
@@ -2701,22 +3090,32 @@ def plot_offshore_bathymetry(offshore_file, bathymetry_file, geo_file=None, regi
 
     eez = gpd.read_file(offshore_file).to_crs("EPSG:4326")
     shapes = gpd.read_file(geo_file).to_crs("EPSG:4326") if geo_file is not None else None
+    # EEZ / zones carrying a 'region' column: only the selected regions' parts count
+    eez_run = eez
+    if regions and "region" in eez.columns:
+        eez_run = eez[eez["region"].isin(regions) | eez["region"].isna()]
 
+    sea = gpd.sjoin(pts, eez_run[["geometry"]], how="inner", predicate="within")
+    sea = sea[~sea.index.duplicated()][["x", "y", "geometry"]]
+    if shapes is not None:
+        on_land = gpd.sjoin(sea, shapes[["geometry"]], how="inner", predicate="within")
+        sea = sea.drop(on_land.index.unique())
+    sea["depth"] = _sample_depth(bathymetry_file, sea["x"].values, sea["y"].values)
+    sea = sea[(sea["depth"] > 0) & (sea["depth"] <= floating_max)]
+    eez_cells = gpd.GeoDataFrame(sea[["x", "y"]], geometry=cells(sea).values, crs="EPSG:4326")
+
+    zone_cells = None
     if zones is not None:
         z = _load_vector(zones).to_crs("EPSG:4326")
+        if regions and "region" in z.columns:
+            z = z[z["region"].isin(regions)]
         zb = z.total_bounds
         cand = pts.cx[zb[0] - dx:zb[2] + dx, zb[1] - dy:zb[3] + dy]
         cand = gpd.GeoDataFrame(cand[["x", "y"]], geometry=cells(cand).values, crs="EPSG:4326")
-        avail = cand.loc[gpd.sjoin(cand, z[["geometry"]], predicate="intersects").index.unique()]
-    else:
-        sea = gpd.sjoin(pts, eez[["geometry"]], how="inner", predicate="within")
-        sea = sea[~sea.index.duplicated()][["x", "y", "geometry"]]
-        if shapes is not None:
-            on_land = gpd.sjoin(sea, shapes[["geometry"]], how="inner", predicate="within")
-            sea = sea.drop(on_land.index.unique())
-        sea["depth"] = _sample_depth(bathymetry_file, sea["x"].values, sea["y"].values)
-        sea = sea[(sea["depth"] > 0) & (sea["depth"] <= floating_max)]
-        avail = gpd.GeoDataFrame(sea[["x", "y"]], geometry=cells(sea).values, crs="EPSG:4326")
+        zone_cells = cand.loc[gpd.sjoin(cand, z[["geometry"]],
+                                        predicate="intersects").index.unique()]
+        zkeys = set(zip(zone_cells["x"], zone_cells["y"]))
+        eez_cells = eez_cells[[k not in zkeys for k in zip(eez_cells["x"], eez_cells["y"])]]
 
     # share of the EEZ outside the cutout
     acrs = equal_area_crs(eez)
@@ -2777,18 +3176,23 @@ def plot_offshore_bathymetry(offshore_file, bathymetry_file, geo_file=None, regi
 
     if shapes is not None:
         shapes.cx[x0:x1, y0:y1].boundary.plot(ax=ax, color="#8a8984", linewidth=0.4, zorder=3)
+    eez_label = (f"EEZ cells outside the zones ({len(eez_cells)})" if zones is not None
+                 else f"EEZ cells, 0-{floating_max} m deep ({len(eez_cells)})")
+    if show_eez_cells and len(eez_cells):
+        eez_cells.plot(ax=ax, facecolor="none", edgecolor=_EEZ_CELL_COLOR, linewidth=0.6,
+                       linestyle=(0, (2, 1.5)), zorder=5)
+    handles = ([Patch(facecolor="none", edgecolor=_EEZ_CELL_COLOR, linestyle="--",
+                      label=eez_label)] if show_eez_cells else [])
     if zones is not None:
-        z.plot(ax=ax, color="#eb6834", edgecolor="none", zorder=5)
-        avail.plot(ax=ax, facecolor="none", edgecolor="#0b0b0b", linewidth=0.6, zorder=6)
-        handles = [Patch(color="#eb6834", label="offshore zones"),
-                   Patch(facecolor="none", edgecolor="#0b0b0b",
-                         label=f"cells overlapping a zone ({len(avail)})")]
-        what = f"{len(avail)} cells overlap the offshore zones"
+        z.plot(ax=ax, color=_ZONE_COLOR, edgecolor="none", zorder=6)
+        zone_cells.plot(ax=ax, facecolor="none", edgecolor="#0b0b0b", linewidth=0.7, zorder=7)
+        handles += [Patch(color=_ZONE_COLOR, label="designated zones"),
+                    Patch(facecolor="none", edgecolor="#0b0b0b",
+                          label=f"cells overlapping a zone ({len(zone_cells)})")]
+        what = (f"{len(zone_cells)} cells overlap the designated zones; "
+                f"{len(eez_cells)} further EEZ cells 0-{floating_max} m deep")
     else:
-        avail.plot(ax=ax, facecolor="none", edgecolor="#eb6834", linewidth=0.5, zorder=5)
-        handles = [Patch(facecolor="none", edgecolor="#eb6834",
-                         label=f"available cells ({len(avail)})")]
-        what = f"{len(avail)} available cells (in the EEZ, 0-{floating_max} m deep)"
+        what = f"{len(eez_cells)} available cells (in the EEZ, 0-{floating_max} m deep)"
     ax.add_patch(Rectangle((gx.min() - dx / 2, gy.min() - dy / 2),
                            gx.max() - gx.min() + dx, gy.max() - gy.min() + dy,
                            facecolor="none", edgecolor="#0b0b0b", linewidth=1.2,
@@ -2998,6 +3402,16 @@ def create_transfer_zip(filename, timeframe, output_root="output", rooftop_segme
     if not found:
         raise FileNotFoundError(f"no outputs for filename={filename!r}, timeframe={timeframe!r} "
                                 f"under {output_root}/")
+    # optional: how the offshore potentials were sized (calibrate_offshore_sites)
+    calib = os.path.join(output_root, "potentials", f"{filename}_offshore_calibration.csv")
+    if os.path.exists(calib):
+        name = os.path.basename(calib)
+        found.append((f"potentials/{name}", calib,
+                      {"path": f"potentials/{name}", "series": "offshore_calibration",
+                       "unit": "GW", "description": "Offshore potential per region: rule "
+                       "(2050 target / max(2 x latest target, zones) / 2 x zones / whole EEZ), "
+                       "target, designated-zone and whole-EEZ capacity, and the capacity "
+                       "sited in zones and on the EEZ"}))
     if missing:
         msg = f"{len(missing)} expected file(s) missing: " + ", ".join(missing)
         if strict:
@@ -3021,7 +3435,9 @@ def create_transfer_zip(filename, timeframe, output_root="output", rooftop_segme
         "run_info": run_info or {},
         "regions": sorted(regions),
         "conventions": "Timeseries: hourly, ERA5 timestamps (UTC), index 'time', one "
-                       "column per region. Profiles cover usable sites only.",
+                       "column per region. Profiles cover usable sites only. Offshore "
+                       "profiles sized to targets (offshore_calibration) are weighted by "
+                       "the capacity sited in each cell (designated zones first).",
         "files": [f[2] for f in found],
         "missing": missing,
     }

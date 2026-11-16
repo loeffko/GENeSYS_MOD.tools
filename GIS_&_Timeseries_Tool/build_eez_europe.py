@@ -17,7 +17,12 @@ list, so `central_asia` becomes genuinely landlocked for offshore and `turkey_le
 keeps only Turkey/Georgia's Black Sea and Israel's Mediterranean zones. Turkey and
 Georgia keep their (real) Black Sea EEZ because they also have oceanic coasts.
 
-Schema written (matches eez_us.geojson / eez_india.geojson): name, geometry. Zone
+Schema written: name, region, geometry. `region` is the hub region (ISO2) owning each
+polygon - the territory's code (ISO_TER1), else the sovereign's; Crown Dependencies count
+as GB. `_get_coords_custom` assigns each offshore cell to that region and drops cells of
+regions outside the tile, so a tile never claims (and double counts) a neighbour's sea.
+Territories that are not hub regions (Faroe, Greenland, Svalbard/Jan Mayen) get their own
+code and so belong to no tile. Zone
 geometries are clipped to a Europe-hub bbox so overseas territories of hub sovereigns
 (French Polynesia, the Falklands, the Caribbean, etc.) are dropped and the file stays small.
 """
@@ -47,6 +52,23 @@ COASTAL = [
 ]
 
 
+# ISO3 -> hub region code; territories that are not hub regions keep their own code
+ISO2 = {
+    "ESP": "ES", "PRT": "PT", "FRA": "FR", "BEL": "BE", "NLD": "NL", "GBR": "GB",
+    "IRL": "IE", "DEU": "DE", "POL": "PL", "SWE": "SE", "NOR": "NO", "FIN": "FI",
+    "DNK": "DK", "ITA": "IT", "SVN": "SI", "HRV": "HR", "GRC": "GR", "BGR": "BG",
+    "ROU": "RO", "ALB": "AL", "MNE": "ME", "BIH": "BA", "EST": "EE", "LVA": "LV",
+    "LTU": "LT", "UKR": "UA", "TUR": "TR", "GEO": "GE", "ISR": "IL", "ISL": "IS",
+    "GGY": "GB", "JEY": "GB", "IMN": "GB",          # Crown Dependencies
+    "FRO": "FO", "GRL": "GL", "SJM": "SJ",          # not hub regions
+}
+
+
+def owner(row):
+    code = row["ISO_TER1"] if row.get("ISO_TER1") else row["ISO_SOV1"]
+    return ISO2.get(code, code)   # far territories are clipped away below
+
+
 def main():
     iso_list = ", ".join(f"'{c}'" for c in COASTAL)
     where = f"ISO_SOV1 IN ({iso_list})"
@@ -54,7 +76,8 @@ def main():
     if g.empty:
         raise SystemExit("no EEZ polygons matched - check ISO_SOV1 codes")
     name = "GEONAME" if "GEONAME" in g.columns else g.columns[0]
-    out = g[[name, "geometry"]].rename(columns={name: "name"})
+    g["region"] = g.apply(owner, axis=1)
+    out = g[[name, "region", "geometry"]].rename(columns={name: "name"})
     # Clip zone geometries to the hub bbox: drops the overseas territories that share a hub
     # sovereign but lie outside Europe, and trims the vertices of any zone that merely grazes
     # the box edge - both the polygon count and the on-disk size come down a lot.

@@ -1,0 +1,66 @@
+# Official offshore wind targets, read by load_offshore_targets() for calibrate_offshore_sites.
+# One row per code: a model region, or a state with the model region it feeds in `region`
+# (targets of one region are summed). target_2050_gw is
+# used as the potential where present; else latest_target_gw (year in latest_target_year) sets
+# max(headroom x target, zone capacity). Rows with neither leave the region on its zones / EEZ.
+# Only official government or agreed EU figures, never industry scenarios (those go in notes).
+# EU: non-binding offshore goals under TEN-E Art. 14, agreements of 18 Dec 2024 (sum of a
+# country's sea basins), from https://energy.ec.europa.eu/topics/renewable-energy/offshore-renewable-energy_en
+# NSOG = https://circabc.europa.eu/rest/download/96da498d-003f-4fe1-8416-88bb393cae8e
+# BEMIP = https://circabc.europa.eu/rest/download/74643a4a-eaba-48d5-a923-6f483eb98f94
+# SW = https://circabc.europa.eu/rest/download/7e5062b7-9d58-49ee-8c26-86f577280a76
+# ATL = https://circabc.europa.eu/rest/download/1b36f7a2-ec23-493f-b372-4a17a93fa137
+# SE = https://circabc.europa.eu/rest/download/3302990c-4768-401a-bc62-cca3ae80c16e
+code,region,hub,target_2050_gw,latest_target_gw,latest_target_year,source,notes
+ES,,europe,3.06,,,TEN-E ATL+SW,"ATL 0.54-1.56 + SW 0.5-1.5 GW; upper end used. Same range for 2030 and 2040."
+PT,,europe,10,,,TEN-E ATL,"2030 = 2, 2040 = 10."
+FR,,europe,45,,,national goal (Oct 2024 priority-zone map); TEN-E NSOG+ATL+SW 42-49,"National 45 GW by 2050 used; TEN-E sum 42-49 GW."
+BE,,europe,8,,,TEN-E NSOG,"2030 = 6, 2040 = 8."
+NL,,europe,70,,,TEN-E NSOG,"2030 = 12, 2040 = 50; in July 2025 the government cut 2040 to 30-40 GW, 2050 not restated."
+GB,,europe,,50,2030,https://www.gov.uk/government/publications/clean-power-2030-action-plan,"Clean Power 2030: 43-50 GW; no official 2050 figure."
+IE,,europe,37,,,TEN-E NSOG+ATL; gov.ie Future Framework,"NSOG 22 + ATL 15; 2040 = 20."
+DE,,europe,70,,,TEN-E NSOG+BEMIP; WindSeeG 2023,"NSOG 65.9 + BEMIP 4.1; WindSeeG: 30 GW 2030, 40 GW 2035, 70 GW 2045."
+DK,,europe,42.2,,,TEN-E NSOG+BEMIP,"NSOG 35 + BEMIP 7.2; ambitions from the Danish Energy Agency forecast, incl. overplanting."
+SE,,europe,,,,TEN-E BEMIP,"No goals ('-'); 2022 MSPs consider 20-30 TWh."
+NO,,europe,,30,2040,https://www.regjeringen.no/en/topics/energy/landingssider/havvind/id2830329/,"Areas for 30 GW by 2040 (May 2022)."
+FI,,europe,12,,,TEN-E BEMIP,"2030 = 1, 2040 = 5; preliminary."
+IT,,europe,8.5,,,TEN-E SW+SE,"SW 4 + SE 4.5; 2030 = 2.1."
+SI,,europe,0,,,TEN-E SE,"0 in 2030, 2040 and 2050."
+HR,,europe,3,,,TEN-E SE,"2030 = 0.51, 2040 = 1.2."
+GR,,europe,11.8,,,TEN-E SW+SE,"SW 0.2 + SE 11.6; 2030 = 1.9, 2040 = 5.8."
+BG,,europe,2.9,,,TEN-E SE,"2030 = 0.5, 2040 = 1.87 (draft NECP)."
+RO,,europe,3,,,TEN-E SE,"2030 = 0, 2040 = 3."
+EE,,europe,7,,,TEN-E BEMIP,"2030 = 1, 2040 = 2; 2040/2050 indicative MSP potential."
+LV,,europe,5,,,TEN-E BEMIP,"2030 = 0.4, 2040 = 2."
+LT,,europe,4.5,,,TEN-E BEMIP,"2030 = 1.4, 2040 = 2.8 (Energy Strategy June 2024)."
+PL,,europe,17.9,,,TEN-E BEMIP,"2030 = 5.9, 2040 = 17.9; no legally binding 2050 target."
+TR,,europe,,5,2035,https://enerji.gov.tr/news-detail?id=31825,"Ministry: 5 GW by 2035 (Saros, Gokceada, Bozcaada, Edremit)."
+AL,,europe,,,,,"No official target found."
+ME,,europe,,,,,"No official target found."
+BA,,europe,,,,,"No official target found; ~20 km coast."
+UA,,europe,,,,,"No official offshore target (Recovery Plan to 2032, NECP wind is onshore)."
+GE,,europe,,,,,"No official target found."
+IL,,europe,,,,,"No official target found."
+IS,,europe,,,,https://pub.norden.org/nordicenergyresearch2025-04/nordicenergyresearch2025-04.pdf,"No stated offshore targets (Nordic Energy Research 2025)."
+ME,ISONE,us,,3,2040,"Maine P.L.2023 ch.481 (LD 1895), https://foleyhoag.com/news-and-insights/blogs/law-and-the-environment/2023/july/maine-gov-mills-signs-bill-to-procure-3-gw-of-offshore-wind-by-2040/","Statutory, up to 3 GW. US federal 30 GW (2030) / 110 GW (2050) goals abandoned in 2025 (EO 14148; all WEAs rescinded 30 Jul 2025), so state targets are used."
+MA,ISONE,us,,5.6,2027,https://www.mass.gov/info-details/laws-governing-long-term-contracts-for-renewable-energy,"Statutory procurement by mid-2027, stalled (2026 bill moves it to 2029). A 23 GW by 2050 figure is a planning study (NREL OWMR 2024 Table 7), not a target."
+RI,ISONE,us,,1.43,2030,https://www.osti.gov/servlets/purl/2434294,"Statutory: +1 GW on top of 430 MW."
+CT,ISONE,us,,2,2030,https://www.cga.ct.gov/2019/ACT/pa/pdf/2019PA-00071-R00HB-07156-PA.pdf,"Statutory procurement authorization (PA 19-71)."
+NY,NYISO,us,,9,2035,https://www.nysenate.gov/legislation/laws/PBS/66-P,"Statutory (CLCPA); 2025 State Energy Plan projects a shortfall."
+NJ,PJM,us,,11,2040,https://www.nj.gov/infobank/eo/056murphy/pdf/EO-307.pdf,"Executive (EO 307, 2022)."
+DE,PJM,us,,1.2,2035,https://legis.delaware.gov/BillDetail/141232,"Statutory procurement authorization of 0.8-1.2 GW (SB 265, 2024), no year given; 2035 is a placeholder."
+MD,PJM,us,,8.5,2031,https://www.marinelog.com/offshore/offshore-wind/maryland-offshore-wind-target-quadruples/,"Statutory goal (POWER Act 2023)."
+VA,PJM,us,,5.2,2034,https://law.lis.virginia.gov/vacode/title56/chapter23/section56-585.1:11/,"Statutory (VCEA 2020); CVOW 2.6 GW under construction."
+NC,SERC,us,,8,2040,https://www.commerce.nc.gov/news/press-releases/governor-cooper-commits-offshore-wind-power-north-carolina-creates-jobs,"Executive (EO 218, 2021): 2.8 GW 2030, 8 GW 2040. The Kitty Hawk leases land in Virginia (PJM)."
+LA,MISO,us,,5,2035,https://offshorewind.biz/2022/02/03/louisiana-sets-5-gw-offshore-wind-target-in-its-first-ever-climate-action-plan,"Planning goal (Climate Action Plan 2022), not pursued since 2024; the only Gulf lease was surrendered in 2026."
+CA,CAISO,us,,25,2045,https://www.energy.ca.gov/news/2024-07/cec-adopts-offshore-wind-energy-strategic-plan-support-californias-100-clean,"CEC planning goal under AB 525: 2-5 GW 2030, 25 GW 2045."
+OR,WECC,us,,3,2030,https://olis.oregonlegislature.gov/liz/2021R1/Measures/Overview/HB3375,"Statutory planning goal (HB 3375, 2021)."
+TX,ERCOT,us,,,,,"No target; Gulf WEAs rescinded Jul 2025."
+VN,,apac,139.1,17.0,2035,https://moit.gov.vn/tin-tuc/phat-trien-nang-luong/chinh-thuc-phe-duyet-quy-hoach-dien-viii-dieu-chinh.html,"Revised PDP8 (Decision 768/QD-TTg, Apr 2025): 6-17 GW 2030-2035, 113.5-139.1 GW 2050 for domestic supply (upper end used); a further ~240 GW by 2050 for export/hydrogen not included."
+PH,,apac,50,,,https://mb.com.ph/2023/9/1/ph-s-industrialization-cast-in-updated-energy-plan,"Philippine Energy Plan 2023-2050: 19 GW (CES1) or 50 GW (CES2) by 2050, upper end used; not checked against the PEP text."
+JP,,apac,,45,2040,https://www.mlit.go.jp/kowan/content/001869863.pdf,"Offshore Wind Industry Vision (Dec 2020): 10 GW 2030, 30-45 GW 2040 (project formation)."
+KR,,apac,,45,2040,https://news.mtn.co.kr/news-detail/2026082616293263226,"MCEE outlook Aug 2026: 3.1 GW 2030, 25 GW 2035, 45 GW 2040."
+AU,,apac,,9,2040,https://www.energy.vic.gov.au/__data/assets/pdf_file/0026/691181/Offshore-Wind-Energy-Implementation-Statement-3.pdf,"No national target; Victoria 2 GW 2032, 4 GW 2035, 9 GW 2040."
+NZ,,apac,,,,,"Offshore Renewable Energy Act 2026: permitting regime, no target."
+ID,,apac,,,,,"No offshore-specific target (RUKN: 37 GW of all wind by 2060)."
+BD,,apac,,,,,"No offshore-specific target (NREL scenarios only)."

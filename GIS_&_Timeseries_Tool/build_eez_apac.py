@@ -17,7 +17,11 @@ full +-180 deg (the same overseas-territory problem as the Europe builder). Clip
 the hub bbox drops those and keeps the file small; the real NZ/AUS mainland EEZ (and
 Macquarie Island, which is close enough to matter for the New Zealand tile) survive.
 
-Schema written (matches eez_us.geojson / eez_india.geojson): name, geometry.
+Schema written: name, region, geometry. `region` is the hub region (ISO2) owning each
+polygon - the territory's code (ISO_TER1), else the sovereign's. `_get_coords_custom`
+assigns each offshore cell to that region and drops cells of regions outside the tile, so
+a tile never claims (and double counts) a neighbour's sea. Australia's island territories
+(Christmas, Cocos, Norfolk) keep their own code and so belong to no tile.
 
 Simplification: Indonesia's EEZ is one archipelagic multipolygon with ~368k vertices -
 large enough that GDAL's GeoJSON reader refuses it outright ("GeoJSON object too
@@ -48,6 +52,20 @@ COASTAL = [
 ]
 
 
+# ISO3 -> hub region code; territories that are not hub regions keep their own code
+ISO2 = {
+    "AUS": "AU", "BGD": "BD", "BRN": "BN", "IDN": "ID", "JPN": "JP", "KHM": "KH",
+    "KOR": "KR", "LAO": "LA", "MMR": "MM", "MYS": "MY", "NZL": "NZ", "PHL": "PH",
+    "PNG": "PG", "PRK": "KP", "SGP": "SG", "THA": "TH", "TLS": "TL", "VNM": "VN",
+    "CXR": "CX", "CCK": "CC", "NFK": "NF",          # not hub regions
+}
+
+
+def owner(row):
+    code = row["ISO_TER1"] if row.get("ISO_TER1") else row["ISO_SOV1"]
+    return ISO2.get(code, code)   # far territories are clipped away below
+
+
 def main():
     iso_list = ", ".join(f"'{c}'" for c in COASTAL)
     where = f"ISO_SOV1 IN ({iso_list})"
@@ -55,7 +73,8 @@ def main():
     if g.empty:
         raise SystemExit("no EEZ polygons matched - check ISO_SOV1 codes")
     name = "GEONAME" if "GEONAME" in g.columns else g.columns[0]
-    out = g[[name, "geometry"]].rename(columns={name: "name"})
+    g["region"] = g.apply(owner, axis=1)
+    out = g[[name, "region", "geometry"]].rename(columns={name: "name"})
     hub = box(*HUB_BBOX)
     before = len(out)
     out = out[out.intersects(hub)].copy()
