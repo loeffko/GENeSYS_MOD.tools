@@ -2390,6 +2390,9 @@ def run_batch_by_tile(tiles, geo_file, timeframe, filename,
     for fam, parts in cf_parts.items():
         # tiles are disjoint in region columns and share the hourly time index, so a
         # horizontal concat aligns on time and unions the region columns cleanly.
+        # Tiles read back on resume carry string timestamps, freshly run ones
+        # datetimes; parse all so they align instead of stacking.
+        parts = [p.set_axis(pd.to_datetime(p.index), axis=0) for p in parts]
         lengths = {len(p) for p in parts}
         if len(lengths) > 1:
             print(f"Warning: family '{fam}' has tiles with different index lengths "

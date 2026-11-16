@@ -56,7 +56,23 @@ COUNTRIES = [
     "UKR", "MDA", "BLR",
     "TUR", "GEO", "ARM", "AZE", "ISR",
     "KAZ", "UZB", "TKM", "TJK", "KGZ",
+    "ISL",
 ]
+
+# Countries whose pack 404s are read from the global WDPA pack instead, if it is
+# cached (build_wdpa_apac.py downloads it). Iceland has had no country pack since at
+# least Sep2026. The global pack may be a newer release than RELEASE.
+GLOBAL_PACK = os.path.join(GEODATA, "_cache", "wdpa_apac", "WDPA_Global.zip")
+
+
+def read_from_global_pack(isos):
+    """Strict-tier polygons of these ISO3 countries from the cached global pack."""
+    from build_wdpa_apac import find_gdb_entry, gdb_poly_layer_name
+    vpath, layer = gdb_poly_layer_name(GLOBAL_PACK, find_gdb_entry(GLOBAL_PACK))
+    where = ("ISO3 IN ('" + "','".join(isos) + "') AND IUCN_CAT IN ('"
+             + "','".join(sorted(STRICT_IUCN)) + "')")
+    print(f"  global pack {os.path.basename(GLOBAL_PACK)}: {where}")
+    return gpd.read_file(vpath, layer=layer, where=where)
 
 
 def fetch_pack(iso):
@@ -139,6 +155,13 @@ def main():
                 n = n[n["IUCN_CAT"].isin(STRICT_IUCN)]
                 if len(n):
                     all_frames.append(n)
+    if skipped and os.path.exists(GLOBAL_PACK):
+        g = read_from_global_pack(skipped)
+        found = sorted(set(g["ISO3"])) if len(g) else []
+        print(f"  global pack: {len(g)} polygons for {found}")
+        if len(g):
+            all_frames.append(normalise(g))
+        skipped = [iso for iso in skipped if iso not in found]
     if not all_frames:
         raise SystemExit("no strict-tier WDPA polygons read")
     merged = gpd.GeoDataFrame(pd.concat(all_frames, ignore_index=True), crs="EPSG:4326")
@@ -149,7 +172,7 @@ def main():
     print(f"wrote {OUT} (layer '{LAYER}'): {len(merged)} polygons, "
           f"{os.path.getsize(OUT)/1e6:.1f} MB")
     if skipped:
-        print(f"skipped (404, no pack): {skipped}")
+        print(f"skipped (no country pack, not in the global pack): {skipped}")
     print("REALM counts:", merged["REALM"].value_counts().to_dict())
     print("IUCN_CAT counts:", merged["IUCN_CAT"].value_counts().to_dict())
 

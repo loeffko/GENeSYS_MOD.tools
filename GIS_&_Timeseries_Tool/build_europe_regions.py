@@ -14,6 +14,7 @@ Run under the genesys conda env:
 """
 import os
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import MultiPolygon
 
 SRC = "geodata/regions/res_countries_europe_mainland.geojson"
@@ -24,8 +25,8 @@ OUT = "geodata/regions/europe_regions.geojson"
 # (IL, KZ, UZ, TM, TJ, KG). The microstates LI, MC and SM are kept in the geojson
 # (valid geometries) even though the notebook leaves them out of any tile - they are
 # too small to catch a cell at the run resolution, so they get no timeseries there.
-# All 51 source rows are in scope, so nothing is currently trimmed; the .isin filter
-# is kept anyway so a narrower KEEP still works. Kept in sync with the notebook's
+# All 51 source rows are in scope, plus Iceland from EXTRA (52), so nothing is
+# currently trimmed; the .isin filter is kept anyway so a narrower KEEP still works. Kept in sync with the notebook's
 # TILES dict (which groups these into cutouts and drops the microstates).
 KEEP = [
     "ES", "PT", "AD",
@@ -39,7 +40,13 @@ KEEP = [
     "UA", "MD", "BY",
     "TR", "GE", "AM", "AZ", "IL",
     "KZ", "UZ", "TM", "TJ", "KG",
+    "IS",
 ]
+
+# Hub countries missing from SRC, taken from the Natural Earth admin-1 file (10 m)
+# instead: {region code: name}. Their admin-1 units are dissolved to one country.
+EXTRA_SRC = "geodata/regions/natural_earth_world_admin1.geojson"
+EXTRA = {"IS": "Iceland"}
 
 # Drop detached offshore island territories that are geographically separate from the
 # rest of the hub and play a negligible energy role, but inflate a tile's cutout. Each
@@ -74,6 +81,11 @@ def clip_offshore_islands(g):
 def main():
     keep = sorted(set(KEEP))
     g = gpd.read_file(SRC).to_crs("EPSG:4326")
+    codes = "', '".join(EXTRA)
+    extra = gpd.read_file(EXTRA_SRC, where=f"iso_a2 IN ('{codes}')").to_crs("EPSG:4326")
+    extra = extra.dissolve(by="iso_a2", as_index=False).rename(columns={"iso_a2": "region"})
+    extra["name"] = extra["region"].map(EXTRA)
+    g = pd.concat([g, extra[["region", "name", "geometry"]]], ignore_index=True)
     present = set(g["region"])
     missing = sorted(set(keep) - present)
     if missing:

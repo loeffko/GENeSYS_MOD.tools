@@ -52,6 +52,7 @@ TILES = {
     "east":          ["UA", "MD", "BY"],
     "turkey_levant": ["TR", "GE", "AM", "AZ", "IL"],
     "central_asia":  ["KZ", "UZ", "TM", "TJ", "KG"],
+    "iceland":       ["IS"],
 }
 
 
@@ -115,6 +116,10 @@ def main():
             continue
 
         out = OUT_TMPL.format(tile=tile)
+        if os.path.exists(out):
+            coastal.append(tile)
+            print(f"{tile}: {out} exists, skip (delete it to re-pull)")
+            continue
         url = ("https://www.gmrt.org/services/GridServer?"
                f"minlongitude={W}&maxlongitude={E}&minlatitude={S}&maxlatitude={N}"
                "&format=coards&resolution=low&layer=topo")

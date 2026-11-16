@@ -43,7 +43,7 @@ HUB_BBOX = (-32.0, 25.0, 90.0, 84.0)
 COASTAL = [
     "ESP", "PRT", "FRA", "BEL", "NLD", "GBR", "IRL", "DEU", "POL", "SWE", "NOR",
     "FIN", "DNK", "ITA", "SVN", "HRV", "GRC", "BGR", "ROU", "ALB", "MNE", "BIH",
-    "EST", "LVA", "LTU", "UKR", "TUR", "GEO", "ISR",
+    "EST", "LVA", "LTU", "UKR", "TUR", "GEO", "ISR", "ISL",
 ]
 
 
